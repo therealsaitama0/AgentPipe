@@ -198,9 +198,10 @@ def call_model(prompt: str, *, system=None, num_predict=None, temperature=None) 
         "messages": messages,
         "stream": False,
         "options": {
-            # Lightly warm: enough spark to be interesting, low enough that a
-            # 1.5b model still keeps its structure (and stays cheap).
-            "temperature": float(os.environ.get("IMPROVE_TEMPERATURE", "0.8"))
+            # Run hot: a higher default keeps generations diverse so the model
+            # doesn't settle into a rut and re-emit the same file over and over.
+            # Still low enough that a 1.5b model mostly keeps its block structure.
+            "temperature": float(os.environ.get("IMPROVE_TEMPERATURE", "1.05"))
             if temperature is None else temperature,
             "top_p": float(os.environ.get("IMPROVE_TOP_P", "0.9")),
             "top_k": int(os.environ.get("IMPROVE_TOP_K", "40")),
