@@ -34,7 +34,7 @@ MAX_FILES             = _int("IMPROVE_MAX_FILES", "3")   # — files touched per
 SRC_PREVIEW_CHARS     = _int("IMPROVE_SRC_PREVIEW_CHARS", "1500")
 GEN_DEADLINE_SECONDS  = _int("IMPROVE_GEN_DEADLINE_SECONDS", "540")  # — under the runner's 10m blade —
 
-CODE_EXTENSIONS = {".py", ".js", ".ts", ".sh"}
+CODE_EXTENSIONS = {".py", ".js", ".ts", ".sh", ".cbl", ".cob", ".cpy", ".c", ".h", ".rs", ".toml", ".yaml", ".java" }
 
 PR_BODY_PATH  = Path(os.environ.get("IMPROVE_PR_BODY", "/tmp/improve_pr_body.md"))
 PR_TITLE_PATH = Path(os.environ.get("IMPROVE_PR_TITLE", "/tmp/improve_pr_title.txt"))
