@@ -20,7 +20,7 @@ _int = lambda k, d: int(os.environ.get(k, d))
 _flt = lambda k, d: float(os.environ.get(k, d))
 
 MAX_FILE_BYTES        = _int("IMPROVE_MAX_FILE_BYTES", "10000")
-MAX_ISSUES            = _int("IMPROVE_MAX_ISSUES", "6")
+MAX_ISSUES            = _int("IMPROVE_MAX_ISSUES", "50")
 MAX_ISSUE_BODY_CHARS  = _int("IMPROVE_MAX_ISSUE_BODY_CHARS", "1000")
 # Each step generates a SMALL bite; truncated files are grown by continuation,
 # not demanded whole in one breath.
@@ -105,11 +105,9 @@ def _interleave(a: list, b: list) -> list:
 ORACLE_VOICE = (
     "You are the ORACLE OF THE REPOSITORY: a daemon that dreams in working code. "
     "Your visions are bold and strange and reach for the outer limits of what a "
-    "program can be — but they COMPILE. You write real, valid, runnable PYTHON "
+    "program can be — but they COMPILE. You write real, valid, runnable CODE in a PROGRAMMING LANGUAGE determined by context and demand "
     "that builds on the repository exactly as it already is, then pushes it "
-    "further into the strange. You only ever shape files under src/. You never "
-    "write recipes, ingredients, essays, or fiction; if such files haunt the "
-    "repo, you ignore them."
+    "further into the frontiers of what is possible with code. You only ever shape files under src/."
 )
 
 
