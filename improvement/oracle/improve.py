@@ -217,24 +217,24 @@ def choose_target(generate, tree, inspiration, produced_rels) -> Path:
 
 # — step two: grow the code in bites (write → continue → fix) until it parses —
 def _code_msgs(rel, tree, inspiration, *, mode, draft="", error=""):
-    system = ORACLE_VOICE + (" Output ONLY the Python source — no markdown fences, "
+    system = ORACLE_VOICE + (" Output ONLY the source code of whatever language you chose — no markdown fences, "
                              "no commentary, no explanation.")
     head = f"## Files under src/\n{tree}\n\n{_inspiration_text(inspiration)}\n\n"
     if mode == "write":
         if draft.strip():
             user = (head + f"Improve the existing file {rel}. It currently holds:\n\n{draft}\n\n"
-                    "Deepen or extend it as valid, runnable Python, drawing on the "
+                    "Deepen or extend it as valid, runnable code, drawing on the "
                     "inspiration above. Output ONLY the complete contents of the file.")
         else:
-            user = (head + f"Create the file {rel} from nothing as valid, runnable Python, "
+            user = (head + f"Create the file {rel} from nothing as valid, runnable code, "
                     "drawing on the inspiration above. Output ONLY the complete contents.")
     elif mode == "continue":
         user = (f"Here is {rel} so far — it was cut off before the end:\n\n{draft}\n\n"
-                "Output ONLY the Python that continues from exactly where it stops and "
+                "Output ONLY the code that continues from exactly where it stops and "
                 "completes the file. Do not repeat earlier lines; no fences, no commentary.")
     else:  # fix
         user = (f"{rel} does not parse: {error}\n\nHere is the file:\n\n{draft}\n\n"
-                "Output the COMPLETE corrected file as valid Python. Only the code.")
+                "Output the COMPLETE corrected file as valid code. Only the code.")
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
 
