@@ -190,17 +190,22 @@ def _inspiration_text(insp) -> str:
 
 
 # — step one: the oracle names the file (new, existing, or one in progress) ———
-def choose_target(generate, tree, inspiration, produced_rels) -> Path:
+def choose_target(generate, tree, inspiration, produced_rels, language) -> Path:
     already = (f"You have already written these this run: {', '.join(produced_rels)}.\n"
                if produced_rels else "")
+
+    content = (f"## Files under src/\n{tree}\n\n{_inspiration_text(inspiration)}\n\n{already}"
+                    "Pick the ONE file this inspiration should touch: create a NEW module "
+                    "(invent a fitting filename under src/), extend an existing one, or "
+                    "continue one you already wrote. Reply with ONLY the path.")
+    if inspiration[0] == "issue":
+        content += f"You have chosen to write in {language}, the filename should have an extension that matches the language."
+
     msgs = [
         {"role": "system",
          "content": ORACLE_VOICE + " Reply with ONE file path under src/ and nothing else."},
         {"role": "user",
-         "content": f"## Files under src/\n{tree}\n\n{_inspiration_text(inspiration)}\n\n{already}"
-                    "Pick the ONE file this inspiration should touch: create a NEW module "
-                    "(invent a fitting filename under src/), extend an existing one, or "
-                    "continue one you already wrote. Reply with ONLY the path."},
+         "content": content},
     ]
     raw = ""
     try:
@@ -214,11 +219,32 @@ def choose_target(generate, tree, inspiration, produced_rels) -> Path:
         target = target.with_suffix(".py")
     return target
 
+def choose_language(generate, tree, inspiration, produced_rels) -> Path:
+    already = (f"You have already written these this run: {', '.join(produced_rels)}.\n"
+               if produced_rels else "")
+    msgs = [
+        {"role": "system",
+         "content": ORACLE_VOICE + " Choose a programming language"},
+        {"role": "user",
+         "content": f"Pick a programming language to accomplish the following task {_inspiration_text(inspiration)}\n\n{already}"
+                    "Respond with only the programmign language."},
+    ]
+    raw = ""
+    try:
+        raw = generate(msgs, num_predict=24, temperature=0.5)
+    except Exception as exc:
+        log(f"target call failed: {exc}")
+    return raw
+
 
 # — step two: grow the code in bites (write → continue → fix) until it parses —
-def _code_msgs(rel, tree, inspiration, *, mode, draft="", error=""):
-    system = ORACLE_VOICE + (" Output ONLY the source code of whatever language you chose — no markdown fences, "
-                             "no commentary, no explanation.")
+def _code_msgs(rel, tree, inspiration, *, mode, draft="", error="", language=None):
+    if language:
+        system = ORACLE_VOICE + (f" Output ONLY the source code in {language}— no markdown fences, "
+                                 "no commentary, no explanation.")
+    else:
+        system = ORACLE_VOICE + (" Output ONLY the source code of whatever language you chose — no markdown fences, "
+                                 "no commentary, no explanation.")
     head = f"## Files under src/\n{tree}\n\n{_inspiration_text(inspiration)}\n\n"
     if mode == "write":
         if draft.strip():
@@ -235,11 +261,15 @@ def _code_msgs(rel, tree, inspiration, *, mode, draft="", error=""):
     else:  # fix
         user = (f"{rel} does not parse: {error}\n\nHere is the file:\n\n{draft}\n\n"
                 "Output the COMPLETE corrected file as valid code. Only the code.")
+
+    if language:
+        user += f" Your code MUST be written in {language}"
+
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
 
 def grow_file(generate, target, tree, inspiration, prior, *, deadline,
-              now=time.monotonic, num_predict=None, max_rounds=MAX_ROUNDS):
+              now=time.monotonic, num_predict=None, max_rounds=MAX_ROUNDS, language=None):
     """Return (code, last_response). Write once from `prior`, then CONTINUE a
     truncated draft or FIX a broken one, re-checking with the parser each round."""
     rel = target.relative_to(REPO_ROOT).as_posix() if REPO_ROOT in target.parents else target.name
@@ -256,7 +286,8 @@ def grow_file(generate, target, tree, inspiration, prior, *, deadline,
         log(f"{rel}: round {rounds}/{max_rounds} [{mode}] (temp={temp})")
         try:
             resp = generate(_code_msgs(rel, tree, inspiration, mode=mode,
-                                       draft=(code or prior), error=str(_syntax_error(code) or "")),
+                                       draft=(code or prior), error=str(_syntax_error(code) or ""),
+                                       language=language),
                             num_predict=num_predict or NUM_PREDICT, temperature=temp)
         except Exception as exc:
             log(f"{rel}: generation failed: {exc}"); continue
@@ -323,7 +354,11 @@ def generate_improvement(generate, tree, src_files, issues, *, deadline_seconds=
     for insp in inspirations:
         if now() >= deadline or len(produced) >= max_files:
             break
-        target = choose_target(generate, tree, insp, list(produced))
+        if insp[0] == "issue":
+            language = choose_language(generate, tree, insp, list(produced))
+        else:
+            language = None
+        target = choose_target(generate, tree, insp, list(produced), language)
         rel = target.relative_to(REPO_ROOT).as_posix() if REPO_ROOT in target.parents else target.name
         if rel in produced:
             prior = produced[rel][1]
@@ -334,7 +369,7 @@ def generate_improvement(generate, tree, src_files, issues, *, deadline_seconds=
                 prior = ""
         log(f"inspiration [{insp[0]}] -> {'extend' if (rel in produced or target.exists()) else 'create'} {rel}")
         code, last = grow_file(generate, target, tree, insp, prior,
-                               deadline=deadline, now=now, num_predict=num_predict, max_rounds=max_rounds)
+                               deadline=deadline, now=now, num_predict=num_predict, max_rounds=max_rounds, language=language)
         if code and code.strip() and _write_one(target, code):
             produced[rel] = (target, code)
             log(f"step wrote {rel} ({len(code)} bytes)")
