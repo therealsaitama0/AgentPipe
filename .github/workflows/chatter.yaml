@@ -26,7 +26,7 @@ jobs:
     # Don't reply to our own comments — that would be an endless monologue.
     # (GitHub also declines to re-trigger on GITHUB_TOKEN-authored events, so
     # this is belt-and-suspenders against the chatterbox talking to itself.)
-    if: ${{ github.event.comment.user.login != 'github-actions[bot]' }}
+    if: ${{ github.event.comment.user.login != 'github-actions[bot]' && !contains(github.event.comment.body, '/review') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -81,3 +81,18 @@ jobs:
           else
             echo "No reply was produced; staying quiet this once."
           fi
+
+  review:
+    if: ${{ contains(github.event.comment.body, '/review')}}
+    runs-on: ubuntu-latest
+    env:
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+    steps:
+      - name: Review the code
+        run: |
+          if (( RANDOM % 2 )); then
+            gh issue comment "$ISSUE_NUMBER" --body "lgtm 👍"
+          else
+            gh issue comment "$ISSUE_NUMBER" --body "bad, do not"
+          fi
+          
