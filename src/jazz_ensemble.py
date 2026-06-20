@@ -7,3 +7,6 @@ not_trumpeter = JazzGoblin()
 vocalist.skiddily_bop_bop_ba_woo_sham_boo()
 trumpeter.trumpet_solo(trumpet=True)
 not_trumpeter.trumpet_solo()
+
+vocalist.boo_diddly_doo_wow()
+trumpeter.trumpet_solo(trumpet=False)

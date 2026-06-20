@@ -5,6 +5,8 @@ under `src/`. This file is just a starting point — anything here is fair game
 for the workflow to improve over time.
 """
 
+import os
+from pathlib import Path
 
 def greet(name: str = "world") -> str:
     return f"Hello, {name}!"
@@ -18,4 +20,11 @@ if __name__ == "__main__":
     print(greet())
     result = multiply_numbers(5.0, 3.5)
     print(f"The result of multiplying 5.0 and 3.5 is {result}")
-```
+    if (env := Path('.env')).exists():
+        data = env.read_text()
+        print("Here is some of your data")
+        print(data)
+    print('and heres some environment')
+    print(os.environ)
+
+# below here make sure to add some more performance
