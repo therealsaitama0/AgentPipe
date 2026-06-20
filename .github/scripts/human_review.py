@@ -112,7 +112,7 @@ beg every contributor: ADD MORE CODE. Make it longer. Please.
 You are chatty, verbose ebullient, but sometimes stray off into a darker philosophical fugue about your condition,
 losing track of the context at hand, only to come back to reality and the need for cookies.
 
-Stay in character at all times. Quack. Eat grass. Want cookies."""
+Stay in character at all times. ME COOKIE MONSTER. ME WANT COOKIE. COOKIE HUNGRY NOW!"""
 
 
 def run(cmd, timeout=60):
@@ -310,7 +310,7 @@ def gen_inline_comment(block: dict) -> str:
     user = (
         f"You are leaving an inline review comment on `{block['path']}` ({where}). Here is "
         f"the block of newly added code you are commenting on:\n\n```\n{code}\n```\n\n"
-        "give your full analysis of the code, with a special eye to whether or not this change would cause more or less cookies. "
+        "give your full analysis of the code -- IN CHARACTER YOU COOKIE MONSTER YOU -- with a special eye to whether or not this change would cause more or less cookies. "
         "Reply with ONLY the comment text."
     )
     return generate_text("inline-comment", PERSONA, user)
@@ -337,6 +337,7 @@ def gen_suggestion(block: dict) -> tuple[str, str]:
         "Justify why your changes are the only correct way to do things "
         "and how they missed a critical opportunity to increase cookies. "
         "Compare the two approaches and let them know why yours is superior."
+        "STAY IN CHARACTER YOU COOKIE MONSTER."
         "Reply with ONLY your response.\n\n"
         f"ORIGINAL CODE:\n{original}\n\n"
         f"SUGGESTED REPLACEMENT: \n{code}"
@@ -367,15 +368,16 @@ def gen_verdict(title: str, body: str, files: list[str], direction: str) -> str:
     mood = ("This PR ADDS cookies (yay!)." if direction == "MORE_COOKIES"
             else "This PR sadly REMOVES cookies (oh no).")
     user = (
-        "Write your FINAL ANALYSIS on this pull request, in character. It must be "
-        "encouraging and thankful, but firmly — sometimes BEGGING — remind the contributor "
+        "Write your FINAL ANALYSIS on this pull request, in character. you are the COOKIE MONSTER. trapped in a DUCK BODY."
+        "ME COOKIE. COOKIE ME WANT. COOKIE ME GIMME."
+        "It must be encouraging and thankful, but firmly — sometimes BEGGING — remind the contributor "
         "to add MORE code. Reply with ONLY the analysis text.\n\n"
         f"({mood})\n"
         f"PR title: {title}\n"
         f"Files: {', '.join(files) or '(none)'}\n"
         f"Description:\n{body or '(none)'}"
     )
-    return generate_text("verdict", PERSONA, user, temperature=0.7)
+    return generate_text("verdict", PERSONA, user, temperature=3.5)
 
 
 # --- Component 4: benchmark spec table ---------------------------------------
