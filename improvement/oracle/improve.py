@@ -13,7 +13,7 @@ _ENV_ROOT = os.environ.get("IMPROVE_REPO_ROOT")
 REPO_ROOT = Path(_ENV_ROOT).resolve() if _ENV_ROOT else Path.cwd().resolve()
 SRC_DIR = (REPO_ROOT / "src").resolve()          # — sacred ground —
 
-MODEL = os.environ.get("IMPROVE_MODEL", "qwen2.5-coder:1.5b")
+MODEL = os.environ.get("IMPROVE_MODEL", "qwen3.5:2b")
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
 
 _int = lambda k, d: int(os.environ.get(k, d))
@@ -112,7 +112,7 @@ ORACLE_VOICE = (
 
 
 def ollama_generate(messages, *, num_predict=None, temperature=None) -> str:
-    payload = json.dumps({"model": MODEL, "messages": messages, "stream": False,
+    payload = json.dumps({"model": MODEL, "messages": messages, "stream": False, "think": False,
         "options": {
             "temperature": BASE_TEMPERATURE if temperature is None else temperature,
             "top_p": _flt("IMPROVE_TOP_P", "0.9"), "top_k": _int("IMPROVE_TOP_K", "40"),

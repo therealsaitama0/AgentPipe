@@ -31,7 +31,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-MODEL = os.environ.get("CHATTER_MODEL", "qwen2.5-coder:1.5b")
+MODEL = os.environ.get("CHATTER_MODEL", "qwen3.5:0.8b")
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
 
 _int = lambda k, d: int(os.environ.get(k, d))
@@ -40,8 +40,15 @@ _flt = lambda k, d: float(os.environ.get(k, d))
 NUM_CTX = _int("CHATTER_NUM_CTX", "8192")
 NUM_PREDICT = _int("CHATTER_NUM_PREDICT", "512")
 REQUEST_TIMEOUT = _int("CHATTER_TIMEOUT", "600")
-GEN_TEMPERATURE = _flt("CHATTER_TEMPERATURE", "2.5")
+GEN_TEMPERATURE = _flt("CHATTER_TEMPERATURE", "0.5")
 MAX_ROUNDS = _int("CHATTER_MAX_ROUNDS", "10")
+
+# "Thinking" models (qwen3, etc.) spend a <think> reasoning pass before their
+# answer; on a small model with a limited num_predict budget that pass can eat
+# the whole budget and leave the answer empty. Disable reasoning by default so
+# the budget goes to the answer; override with CHATTER_THINK=1.
+THINK = os.environ.get("CHATTER_THINK", "false").lower() in ("1", "true", "yes", "on")
+_THINK_TAG = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 
 # The context budget, in characters (a rough ~4 chars/token proxy for NUM_CTX).
 # The three slices below are carved out of it: ~1/3 recursive prompt, ~30%
@@ -205,12 +212,19 @@ def ollama_generate(system: str, user: str, *, temperature: float, num_predict: 
         "messages": [{"role": "system", "content": system},
                      {"role": "user", "content": user}],
         "stream": False,
+        # Turn off the model's reasoning pass (see THINK above) so num_predict is
+        # spent on the answer, not on <think> tokens we'd only discard.
+        "think": THINK,
         "options": {"temperature": temperature, "num_predict": num_predict, "num_ctx": NUM_CTX},
     }).encode("utf-8")
     req = urllib.request.Request(f"{OLLAMA_URL}/api/chat", data=payload,
                                  headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as r:
-        return (json.loads(r.read().decode("utf-8")).get("message") or {}).get("content", "")
+        msg = (json.loads(r.read().decode("utf-8")).get("message") or {})
+    # Prefer the answer; if a thinking model left content empty, fall back to its
+    # reasoning field. Strip any inline <think>…</think> block either way.
+    content = (msg.get("content") or "").strip() or (msg.get("thinking") or "")
+    return _THINK_TAG.sub("", content).strip()
 
 
 def generate(previous: str, issue: str, book: str) -> str:

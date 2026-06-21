@@ -10,7 +10,7 @@ on:
       model:
         description: "Ollama model to run"
         required: false
-        default: "qwen2.5-coder:1.5b"
+        default: "qwen3.5:0.8b"
 
 # NOTE on security: the token below is intentionally NOT granted `workflows`
 # permission, so GitHub itself will reject any push that touches
@@ -31,7 +31,7 @@ jobs:
     timeout-minutes: 15
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      IMPROVE_MODEL: ${{ github.event.inputs.model || 'qwen2.5-coder:1.5b' }}
+      IMPROVE_MODEL: ${{ github.event.inputs.model || 'qwen3.5:0.8b' }}
 
     steps:
       - name: Checkout

@@ -1,14 +1,23 @@
 # BookOfBananaPudding.py
 
+import json
+from typing import TypedDict
 from recipe_library import RecipeLibrary, BananaPudding
+
+class BananaBankAccount(TypedDict):
+    color: str
+    bunch_size: int
+    banana_dollars: float
+
 
 class BookOfBananaPudding:
     def __init__(self):
         self.library = RecipeLibrary()
 
-    def load_recipes(self):
+    def load_recipes(self) -> list[BananaBankAccount]:
         # Load recipes from various sources or files into the library
-        pass
+        return json.loads("bananabank.json")
+
 
     def export_to_pdf(self):
         # Export recipes to a PDF file using Melville's Moby Dick style
