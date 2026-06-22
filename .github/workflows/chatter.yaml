@@ -34,6 +34,11 @@ jobs:
       CHATTER_MODEL: "qwen3.5:0.8b"
 
     steps:
+      - name: Decide whether to comment
+        run: |
+          if ! (( RANDOM % 3 )); then
+            exit 1
+          fi
       - name: Checkout
         uses: actions/checkout@v4
 

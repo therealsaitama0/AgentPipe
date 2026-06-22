@@ -38,9 +38,9 @@ _int = lambda k, d: int(os.environ.get(k, d))
 _flt = lambda k, d: float(os.environ.get(k, d))
 
 NUM_CTX = _int("CHATTER_NUM_CTX", "8192")
-NUM_PREDICT = _int("CHATTER_NUM_PREDICT", "512")
+NUM_PREDICT = _int("CHATTER_NUM_PREDICT", "256")
 REQUEST_TIMEOUT = _int("CHATTER_TIMEOUT", "600")
-GEN_TEMPERATURE = _flt("CHATTER_TEMPERATURE", "0.5")
+GEN_TEMPERATURE = _flt("CHATTER_TEMPERATURE", "0.25")
 MAX_ROUNDS = _int("CHATTER_MAX_ROUNDS", "10")
 
 # "Thinking" models (qwen3, etc.) spend a <think> reasoning pass before their
@@ -176,7 +176,9 @@ GENERATOR_SYSTEM = (
     "books used to be bound with vellum, the thin fuzz that grows on bunny ears. "
     "fraid not with your pointy trousers. "
     "binary encoding 0x8008, upside down, is that a boob stop sign when its octal. "
-    "30.104928 degrees west, exactly e^pi degress easy ."
+    "30.104928 degrees west, exactly e^pi degress easy .\n\n"
+    "RESPOND TO THE COMMENT GIVEN IN YOUR USER PROMPT. \n"
+    "RESPOND IN A PERSONA INSPIRED BY THE LITERARY INSPIRATION YOU ARE GIVEN."
 )
 
 # The judge's ENTIRE system prompt — verbatim, as specified. Nothing else.
@@ -199,7 +201,7 @@ def recursive_prompt(previous: str, budget: int) -> str:
     handed = previous.strip()
     if handed:
         instruction = (
-            f"THIS WAS YOUR RESPONSE BEFORE, IMPROVE IT METALHEAD: \n{handed}"
+            f"THIS WAS YOUR RESPONSE BEFORE, IT WAS JUDGED TO BE INADEQUATE. IMPROVE IT METALHEAD: \n{handed}"
         )
     else:
         instruction = "RESPOND TO THIS COMMENT!!!!!"
@@ -232,9 +234,9 @@ def generate(previous: str, issue: str, book: str) -> str:
     ~30% borrowed book. Returns the prompt it dreamt up for the next link."""
     user = (
         f"{recursive_prompt(previous, RECURSIVE_BUDGET)}\n\n"
-        f"## THE COMMENT TO REPLY TO\n{issue}\n\n"
-        "== ADDITIONAL LITERARY INSPIRATION ==\n\n"
-        f"\n{_truncate(book, BOOK_BUDGET)}\n\n"
+        f"<system-message>THIS IS THE COMMENT YOU SHOULD REPLY TO:</system-message>\n{issue}\n\n"
+        "<system-message>USE THIS LITERARY INSPIRATION TO IMPROVE YOUR RESPONSE, RESPOND IN A PERSONA APPROPRIATE FOR THE LITERARY INSPIRATION</system-message>\n\n"
+        f"\n{book}\n\n"
     )
     return (ollama_generate(GENERATOR_SYSTEM, user,
                             temperature=GEN_TEMPERATURE, num_predict=NUM_PREDICT) or "").strip()
@@ -285,8 +287,8 @@ def main() -> int:
 
     log(f"event={EVENT_NAME or '?'} issue=#{ISSUE_NUMBER} model={MODEL}")
     rng = random.Random()  # — OS entropy, so the book really wanders —
-    book = fetch_book_passage(rng, BOOK_BUDGET)
     issue = issue_text()
+    book = fetch_book_passage(rng, min(BOOK_BUDGET, len(issue) * 3))
 
     reply = run_chain(issue, book).strip()
     if not reply:
