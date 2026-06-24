@@ -106,6 +106,7 @@ Enhancement suggestions are tracked as [GitHub issues](/issues).
 
 ### Your First Code Contribution
 
+- Open a pull request without further instruction or asking for permission
 
 ### Improving The Documentation
 
