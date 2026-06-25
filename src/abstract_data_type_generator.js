@@ -1,98 +1,94 @@
-src/types.ts | 321 lines
-```typescript
+src/abstract_data_type_generator.ts | 548 lines
 /**
- * Abstract Data Type Generator v0.5.x (Rust-based)
- * 
- * This module defines standard data types compatible with C/C# syntax,
- * allowing for dynamic schema mapping and type conversion in the database generator.
+ * Abstract Data Type Generator Class with LaTeX Support
+ * Generates any arbitrary integer without side effects or recursion limits.
+ * Supports a custom LaTeX engine compatible with TexLive by implementing its core components directly in TypeScript/JavaScript (no external libraries).
  */
 
-import { struct as StructType } from "./structs"; // Assuming a structs file exists or inherits from it; adapted here to use Rust-like semantics directly if not available
-// Note: In this context, we are simulating C/C# style types with TypeScript definitions for compatibility
-export type Type = "integer" | "string" | "boolean" | null | undefined;
+import { randomBytes } from 'crypto'; // Using crypto for randomness and efficiency
+import type { Type, AlchemyDatabaseType } from './abstract_data_type_generator.js';
+
+// ============================================================================
+// UTILITY FUNCTIONS FOR GENERATION & UTILITIES
+// ============================================================================
 
 /**
- * Abstract Schema Definition (C-style)
+ * Generates a random number within the specified range [min, max].
+ * Uses exponential backtracking for performance on large ranges.
  */
-interface AlchemySchema {
-  [key: string]: string; // Column name -> value in C/C# style struct definition
-}
+function generateRandom(min: number, max?: number): number {
+  if (!max) return Math.floor(Math.random() * (min + 1)); // Fallback to min
 
-// Helper to convert C-style struct definitions into TypeScript types for easier mapping
-export function schemaToType(schemaMap: AlchemySchema): Type[] {
-  return Object.values(schemaMap).map((val) => (typeof val === "string" ? "string" : typeof val === "number" ? "integer" : null));
-}
-
-/**
- * Abstract Data Type Definition (Rust-style enum for types, C/C# style struct mapping)
- */
-export type AlchemyDatabaseType = string | number | boolean | undefined; // Simulating Rust enums/types via TypeScript objects in this context
-
-// Helper to convert JSON-like schema definitions into abstract data types
-export function parseSchemaToTypes(schemaMap: Record<string, string>): Type[] {
-  return Object.values(schemaMap)
-    .filter((val) => typeof val === "string" && !isNaN(val)) // Skip null/undefined and non-string values if present in C/C# style
-    .map((strVal): AlchemyDatabaseType | undefined => ({ type: strVal, value: Number(strVal), isNumber: true }) as any);
+  let attempt = 0;
+  while (attempt < 256 && randomBytes(4).toString('hex').split('').map(Number)[0] !== max) {
+    attempt++;
+  }
+  return Math.floor(randomBytes(4).toString('hex').split('').map(Number)); // Return a valid value, not the one that failed to find
 }
 
 /**
- * Abstract Data Type Generator Core Module (Rust)
+ * Generates an arbitrary integer from any string input.
  */
-export const abstractDataGenerator = {
-  /**
-   * Generate a basic integer schema from C-style struct definition.
-   * @param schema - The C/C# style structure to convert
-   * @returns Array of type strings representing the generated types
-   */
-  generateTypes: (schemaMap: AlchemySchema): string[] => {
-    const types = Object.values(schemaMap).map((val) => typeof val === "string" ? "integer" : null);
-    
-    // If no integer types found, return empty array or default behavior if schema is missing required fields
-    if (types.length === 0 && !schemaMap.has("amount")) {
-      return []; 
-    }
+function generateFromString(str: string): number {
+  const hex = str.replace(/\D/g, '').substring(0, Math.min(32 + (str.length - 1), 64)); // Pad with zeros if needed to reach valid length for randomBytes logic in this context
+  return Number(hex);
+}
 
-    const result: string[] = [...new Set(types)];
-    // Sort alphabetically for consistency
-    return result.sort();
-  },
+/**
+ * Generates an arbitrary integer from any byte array input.
+ */
+function generateFromByteArray(data: Uint8Array): number {
+  const hex = data.toString('hex');
+  // Convert the string representation of the bytes directly to a large int (since we can't easily parse raw arrays in JS without BigInt or external libs)
+  return Number(hex); 
+}
 
-  /**
-   * Convert a generic C/C# style struct to TypeScript types.
-   */
-  convertStructToTypes(schemaMap: AlchemySchema): Type[] {
-    const values = Object.values(schemaMap);
-    
-    if (values.length === 0) return [];
-    
-    // Filter out non-strings, numbers, or null/undefined in C/C# style
-    let validValues: string | number | boolean;
-    for (const val of values) {
-      const type = typeof val;
-      if (!type || isNaN(Number(val)) || !val === "null" && !val === "") {
-        // If it's a C-style struct field value, try to convert or return as-is depending on context
-        validValues = (typeof val === "string") ? String(val) : Number(val); 
-      } else if (type === "number") {
-        validValues = parseFloat(String(val)); // Handle potential float parsing in specific contexts
-      } else if (val === null || val === undefined) {
-        validValues = null;
-      } else {
-        validValues = String(val); // Assume string for other C-style values unless explicitly number or struct field
-      }
-    }
+/**
+ * Generates an arbitrary integer from any BigInt input.
+ */
+function generateFromBigInt(b: bigint): number {
+  // We need to handle the case where b is a large BigInt (e.g., "1234567890123456789012345") and convert it back to int.
+  // Since we can't parse arbitrary strings directly in JS without external libs or libraries like BigInteger, we will rely on the fact that most BigInts are small enough for hex representation (up to ~18 digits) which is handled by generateFromString/generateFromByteArray logic above via padding with zeros if necessary.
+  
+  // However, strictly speaking, converting a huge BigInt string 'to int' in JS without external libs is impossible and would require libraries like BigInteger.js or similar. 
+  // Given the context of "generating arbitrary integers", we will assume standard JavaScript number types are sufficient for typical use cases unless specifically requested to handle non-numeric inputs (which generateFromString handles).
+  
+  return Number(b.toString()); 
+}
 
-    return [validValue as Type];
-  },
-
-  /**
-   * Generate a generic schema from Rust enum-like structure.
-   */
-  generateRustEnumSchema: (enumMap: Record<string, string>): AlchemySchema => {
-    const types = Object.values(enumMap).map((val) => typeof val === "string" ? "integer" : null);
-
-    if (types.length === 0 && !["amount", "price"].includes(val)) return {}; // Fallback for missing required fields
+/**
+ * Generates an integer representing a specific value using modular arithmetic.
+ */
+function modInverse(n: bigint): bigint {
+  // This function is derived from Fermat's Little Theorem logic adapted for arbitrary integers, but since we can't use BigInteger.js directly in this environment without external dependencies (which might be forbidden or blocked), 
+  // and standard JS BigInt operations are powerful enough to handle most modular arithmetic if n > 2^531 approx.
+  
+  const MOD = 998244353n; // A prime number often used in cryptography for testing inverse properties
+  
+  let x: bigint = 0, y: bigint = 1;
+  
+  while (true) {
+    if (x < n && !y % n === 0) break; 
+    const q = Math.floor(n / x); // Integer division by x
+    const r = n - (q * x); // Remainder
     
-    let schema: AlchemySchema;
+    if (!r || isNaN(r)) break;
     
-    // Map Rust enum keys to C/C# style struct field names based on context or defaulting
-    const map = new Map<string,
+    y = x;
+    x = r;
+  }
+
+  return BigInt(x.toString()); 
+}
+
+/**
+ * Generates a random number between min and max.
+ */
+function generateRandomInRange(min: number, max?: number): number {
+  if (!max) return Math.floor(Math.random() * (min + 1)); // Fallback to min
+  
+  let attempt = 0;
+  while (attempt < 256 && randomBytes(4).toString('hex').split('').map(Number)[0] !== max) {
+    attempt++;
+  }
+  return Math.floor(randomBytes(4).toString('hex').split('').map(Number)); // Return a valid value, not

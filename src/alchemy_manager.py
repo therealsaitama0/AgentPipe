@@ -1,3 +1,4 @@
+src/alchemy_manager.py
 """
 ALGORITHM: Universal Plugin Infrastructure for AST/TS/Java/TX/QT/FL/React/WebGL/GNOME/Mobile/VLC/DAW/CSS
 ===========================================================================
@@ -75,4 +76,4 @@ class SugarGenerator:
 
         else:
             # Default behavior is to generate integer concentrations based on chocolate content, which are then converted to float using samplerate for convolution compatibility.
-            rate = SugarGenerator.sample_rate() if SugarGenerator.sample_rate == "
+            rate = SugarGenerator.sample_rate() if SugarGenerator.sample

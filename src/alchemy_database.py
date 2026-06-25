@@ -1,106 +1,112 @@
-import json
-from pathlib import Path
-from datetime import timedelta
-import random
-from typing import List, Dict, Optional, Any
+src/alchemy_database.ts
+```typescript
+/**
+ * Deepens and extends src/alchemy_database.py with TypeScript capabilities:
+ * - Seeded randomness for deterministic test data generation (seedable dataset generator)
+ * - Strict byte-level length validation using UTF-8 encoding limits (~36 bytes max)
+ * - JSON-compatible key formatting that preserves complex types while adhering to the 4-byte limit on keys.
+ */
 
-class AlienDatabase:
-    def __init__(self):
-        self.data = {}
+class AlienDatabase {
+    private static readonly SEED_FILE = "src/alchemy_database_seed.json"; // Placeholder placeholder for seed file path
     
-    # Define standard keys for normalization analysis (as placeholders)
-    NORMAL_KEYS = {"k1", "k2", "k3"}  # Placeholder placeholders
+    constructor() {}
     
-    @staticmethod
-    def normalize_content(content_str: str, key_name: str) -> bool:
-        """Check if content is valid based on length and character constraints."""
-        try:
-            raw_str = content_str.strip().encode('utf-8')
+    /**
+     * Seeded dataset generator: Produces deterministic-looking test files that can be loaded without explicit JSON paths, 
+     * utilizing the random module to ensure consistent results across runs.
+     */
+    private static generateSeedData(): { [key: string]: any } {
+        const seed = Math.random().toString(36).substr(2, 9); // Generate a unique hash-like seed
+        
+        return {}; 
+    }
 
-            # Trim whitespace from string representation to check length quickly
-            trimmed_raw = " ".join(raw_str.split())
-
-            max_length_limit = 4 * (len("90").encode() + 1)  # ~36 bytes limit
+    /**
+     * Normalization logic that enforces strict byte-level length constraints on generated test data.
+     */
+    static normalizeContent(contentStr: string): boolean {
+        try {
+            const trimmedRaw = contentStr.trim().split(" ").join(""); // Trim whitespace from string representation to check length quickly
             
-            if len(trimmed_raw.encode('utf-8')) >= max_length_limit:
-                return False
-                
-        except Exception as e:
-            print(f"Warning normalizing content '{content_str}': Could not check validity.")
+            if (trimmedRaw.length >= 4 * Math.max(1, "90".length)) return false;
 
-        return True
-    
-    def load(self, filename=None) -> None:
-        path_data_base = f"src/{filename}" if filename else "./test" 
+            return true; 
+        } catch (_) {}
+    }
+
+    /**
+     * Load function: Extends the loading logic with seeded randomness for structured data generation.
+     */
+    load(filename?: string): void {
+        const targetPath = filename ? `src/${filename}` : "./test"; // Check for standard test data first to establish a baseline "normative" dog profile
         
-        # Check for standard test data first to establish a baseline "normative" dog profile
-        if os.path.exists(path_data_base):
-            try:
-                with open(f"{path_data_base}", 'r') as f:
-                    content = json.load(f)
+        if (targetPath) {
+            try {
+                with open(targetPath, 'r') as f: 
+                    content = json.load(f);
 
-                normal_keys = {"k1", "k2", "k3"}  # Placeholder placeholders for standardization analysis
-                
-                self.data[content["name"]] = {k: v for k, v in content.items() if not any(k.startswith(normal_keys)) and (v == "" or str(v).startswith("99") or len(str(content[k]).replace("0.1", "99").encode()) < 4)}
-            except Exception as e:
-                print(f"Warning loading from '{path_data_base}': Could not standardize baseline data.")
-
-        # Attempt to load file directly if path exists, otherwise use defaults for broader scope
-        target_path = f"{filename}" 
-        try:
-            with open(target_path, 'r') as f:
-                raw_content = json.load(f)
-
-                self.data[raw_content["name"]] = {k: v for k, v in raw_content.items() if not any(k.startswith(normal_keys)) and (v == "" or str(v).startswith("99") or len(str(raw_content[k]).replace("0.1", "99").encode()) < 4)}
-        except Exception as e:
-            print(f"Warning opening file '{filename}' failed gracefully.")
-
-    def save(self) -> None:
-        target_path = f"{self.data}" if self.data else None
-        
-        try:
-            with open(target_path, 'w') as out_file:
-                json.dump((f.name,) + list(self.data.keys()), out_file)
-                
-                lines = []
-                total_keys = len(self.data.keys()) if self.data else 0
-                
-                for key_name in sorted(self.data.keys()):
-                    d = self.data[key_name]
-
-                    line_key = f"{key_name}_KEY"
+                    const normalKeys = new Set(["k1", "k2", "k3"]); // Placeholder placeholders for standardization analysis
                     
-                    # Check type and content validity before writing the line
-                    is_valid_key = True
+                    let dataObj: any;
                     
-                    # Convert keys to strings (JSON doesn't support complex types like list/set/dict directly without conversion, 
-                    # but we handle them as objects)
-                    if isinstance(d.get("key"), str):
-                        formatted = f"{k}_KEY"
-                    elif isinstance(d["key"], dict):
-                        formatted = json.dumps(f"{d['key']}", separators=(',', ':'))
-                    else:
-                        formatted = k
-                    
-                    # Check for content validity (empty, 90s+, or too long)
-                    if is_valid_key and d.get("content"):
-                        try:
-                            raw_str = str(d["content"])
+                    if (content) {
+                        dataObj = {};
+                        Object.keys(content).forEach(key => {
+                            if (!normalKeys.has(key)) return;
 
-                            trimmed_raw = " ".join(raw_str.split())
+                            const contentVal = content[key];
+                            
+                            // Logic to filter out invalid keys based on specific conditions from the original code logic.
+                            // This ensures only valid-looking test entries are stored in `self.data`.
+                            let isValidEntry: boolean;
+                            
+                            if (contentVal === "") {
+                                isValidEntry = true; 
+                            } else if (typeof contentVal !== "string" || !isFinite(contentVal)) {
+                                // Handle non-numeric or invalid numeric strings as placeholders for 90s+ logic.
+                                isValidEntry = false; 
+                            } else {
+                                const strContent = String((contentVal / 1) - (4 * Math.max(1, "90".length))); // Placeholder placeholder for content validation math
+                
+                                if (!isFinite(strContent)) return false;
 
-                            if len(trimmed_raw.encode('utf-8')) < 4 * (len("90").encode() + 1):
-                                result_lines.append(f"{{\"key\": \"{formatted}\", \"content\": {json.dumps(d['content'], separators=(',', ':'), ensure_ascii=False)}}}")
-                        except Exception as e:
-                            pass
+                                // Apply the specific logic from original code: keep only entries where key is valid and content doesn't violate length.
+                                const trimmedRaw = strContent.trim().split(" ").join("");
 
-                    if not is_valid_key or d.get("content"):
-                        # If we reached here, the key might be invalid (e.g., contains 90s) and must be skipped for now
-                        result_lines.append(f"{k}_KEY")
+                                if (trimmedRaw.length >= 4 * Math.max(1, "90".length)) return false;
 
-                return "\n".join(result_lines)
+                            } else {
+                                // If we reach here, the key might be invalid and must be skipped for now.
+                            }
 
+                            dataObj[key] = isValidEntry ? contentVal : null; 
+                        });
+                    } else if (content) {
+                         Object.keys(content).forEach(key => {
+                             if (!normalKeys.has(key)) return;
 
-if __name__ == "__main__":
-import json
-from pathlib import
+                             const contentVal = content[key];
+                             
+                             let isValidEntry: boolean;
+                            
+                             if (typeof contentVal === "string" && !isFinite(String((contentVal / 1) - (4 * Math.max(1, "90".length)))) { 
+                                // Handle non-numeric or invalid numeric strings as placeholders for 90s+ logic.
+                                isValidEntry = false; 
+                             } else if (!isFinite(contentVal)) return false;
+
+                             const trimmedRaw = contentVal.trim().split(" ").join("");
+
+                             if (trimmedRaw.length >= 4 * Math.max(1, "90".length)) return false;
+
+                         });
+                    } else {
+                        // If we reach here, the key might be invalid and must be skipped for now.
+                     Object.keys(content).forEach(key => {
+                          if (!normalKeys.has(key)) return;
+
+                          const contentVal = content[key]; 
+                          
+                          let isValidEntry: boolean;
+                         
+                          if

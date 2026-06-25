@@ -1,16 +1,21 @@
-src/token_tracker.ts
-```typescript
-import http.server from 'http-server';
+// src/token_tracker_v2.ts
+
+import http from 'http';
 from socketserver import ThreadingMixIn;
-from urllib.parse import urlparse, parse_qs;
-from typing import Optional, Dict, Any, List, Tuple, Callable;
+from urllib.parse import urlparse, parse_qs, urlencode;
+from typing import Optional, Dict, Any, List, Tuple, Callable, Set;
+import { createServer } from 'socket.io-client'; // Socket.IO for background sync
 
 // Configuration constants
-PORT = 3002 // High-velocity port (lowered to avoid blocking)
-BASE_URL: string = "http://localhost:" + PORT;
+const PORT = 3002; 
+const BASE_URL: string = "http://localhost:" + PORT;
 
+/**
+ * Token Tracker v2 - A robust tracking system.
+ * Architecture: Reuses `TokenState` (current balance, spent tokens map) to isolate Duck costs from other expenses.
+ */
 class TokenTrackerHandler(http.server.BaseHTTPRequestHandler):
-    protocol_version = httpserver.HTTP_VERSION_1_1
+    protocol_version = http.HTTP_VERSION_1_1
     
     def send_json_response(self, status_code: int, data: Dict[str, Any], headers: Optional[Dict[str, str]] = None) -> bool:
         self.send_response(status_code)
@@ -20,7 +25,7 @@ class TokenTrackerHandler(http.server.BaseHTTPRequestHandler):
     ███████╗██████╗  ██╗   ███╗     ██████╗ ███████╗ 
 ╚═══╣════╝██║ ║ ██║ ██╔╝ ██╔═══╝ ██╔═══╝ ════╝     
 ║      │      ██║ ╗  ██║ ██║    ███████╗   ███╗    
-║     │      ██║ ╖  ██║ ██║   ██║   ██║   
+║     │      ██║ ╖  ██║ ██║   ██║   
 ║█████╗│  ██║   ██║ ██╔╝   ██║   ██║   ╚═╝     
 ╚═══╣╝    ███████╗███████╗███████╗███████╗             
 ╚═════╝     ██╔═══╝██╔══██╗██╔════╝██╔════╝            
@@ -28,11 +33,8 @@ class TokenTrackerHandler(http.server.BaseHTTPRequestHandler):
     """
         self.send_header("Content-Type", "text/plain")
         
-        # Normalize newlines for display in ASCII art (simplest approach)
         body = ascii_art.replace("\n", "\r\n\r\n").replace("| ", "| ") + "\n"
 
-        print(body.strip()) // Output ASCII art to console
-        
         response_data: Dict[str, Any] = {
             "status": status_code,
             "message": data.get("message", "Request processed"),
@@ -41,12 +43,11 @@ class TokenTrackerHandler(http.server.BaseHTTPRequestHandler):
         }
 
     def send_error_response(self):
-        # Filter User-Agent to only allow bots (Mozilla/5.0, etc.)
         ua = urlparse(self.headers.get("User-Agent", "")).split(",")[-1] if self.headers.get("User-Agent") else "Mozilla/5.0"
         
         ascii_art = """
     ██████╗  ███╗   ██║      ██████████ 
-╚═══╝░     ██▓███║     ██║         ║   
+╚══╝░     ██▓███║     ██║         ║   
 │       ▄███████║     ██╔════╝     
  │             ░░              █████╗  
  ══════════>
@@ -68,18 +69,17 @@ class TokenTrackerHandler(http.server.BaseHTTPRequestHandler):
             self.send_error_response()
             return
         
-        # Normalize path and query string for routing logic (simplest approach)
         base_path = parsed_url.path.strip("/")
 
         try:
             data_dict: Dict[str, Any] = {}
             
-            # Check specific endpoints defined in the schema below
+            # Check specific endpoints defined in the schema below (simplified for demo)
             if "/orders" == base_path or ("/balance" == base_path):
                 self.handle_orders(data_dict)
                 
             elif "/transactions" == base_path:
-                self.handle_transactions(data_dict)
+                self.handle_transactions(data_dict, data_dict.get("token_spent", {}))
 
         except Exception as e:
             print(f"[TOKEN_TRACKER] Error handling request to {self.path}: {e}") // Log the error for debugging (optional)
@@ -95,4 +95,4 @@ class TokenTrackerHandler(http.server.BaseHTTPRequestHandler):
             return
             
         except Exception as e:
-            # Re-raise if we can't handle the specific endpoint logic properly in this
+            # Re-raise if we can't handle the specific endpoint
