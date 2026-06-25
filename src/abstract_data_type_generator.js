@@ -1,98 +1,104 @@
-src/types.ts | 321 lines
-```typescript
-/**
- * Abstract Data Type Generator v0.5.x (Rust-based)
- * 
- * This module defines standard data types compatible with C/C# syntax,
- * allowing for dynamic schema mapping and type conversion in the database generator.
- */
+const { createKubernetesClient as k8sCreateClient } = require('k8s-client');
 
-import { struct as StructType } from "./structs"; // Assuming a structs file exists or inherits from it; adapted here to use Rust-like semantics directly if not available
-// Note: In this context, we are simulating C/C# style types with TypeScript definitions for compatibility
-export type Type = "integer" | "string" | "boolean" | null | undefined;
+// ============================================
+// FIDO DOG: HyperFungible IoT Fog-Computing API Client
+// A single-page RESTful backend for deploying Fido containers.
+// ============================================
 
 /**
- * Abstract Schema Definition (C-style)
+ * Validates the incoming pod lifecycle state before creating a deployment.
+ * Ensures only robust, connected devices can deploy to this cloud-native service.
  */
-interface AlchemySchema {
-  [key: string]: string; // Column name -> value in C/C# style struct definition
-}
+function validatePodLifecycle(podStatus: string): boolean {
+  if (podStatus === 'Ready') return true; // Already deployed and healthy
 
-// Helper to convert C-style struct definitions into TypeScript types for easier mapping
-export function schemaToType(schemaMap: AlchemySchema): Type[] {
-  return Object.values(schemaMap).map((val) => (typeof val === "string" ? "string" : typeof val === "number" ? "integer" : null));
-}
-
-/**
- * Abstract Data Type Definition (Rust-style enum for types, C/C# style struct mapping)
- */
-export type AlchemyDatabaseType = string | number | boolean | undefined; // Simulating Rust enums/types via TypeScript objects in this context
-
-// Helper to convert JSON-like schema definitions into abstract data types
-export function parseSchemaToTypes(schemaMap: Record<string, string>): Type[] {
-  return Object.values(schemaMap)
-    .filter((val) => typeof val === "string" && !isNaN(val)) // Skip null/undefined and non-string values if present in C/C# style
-    .map((strVal): AlchemyDatabaseType | undefined => ({ type: strVal, value: Number(strVal), isNumber: true }) as any);
-}
-
-/**
- * Abstract Data Type Generator Core Module (Rust)
- */
-export const abstractDataGenerator = {
-  /**
-   * Generate a basic integer schema from C-style struct definition.
-   * @param schema - The C/C# style structure to convert
-   * @returns Array of type strings representing the generated types
-   */
-  generateTypes: (schemaMap: AlchemySchema): string[] => {
-    const types = Object.values(schemaMap).map((val) => typeof val === "string" ? "integer" : null);
-    
-    // If no integer types found, return empty array or default behavior if schema is missing required fields
-    if (types.length === 0 && !schemaMap.has("amount")) {
-      return []; 
+  const statuses = ['Running', 'Failed'];
+  
+  for (const status of statuses) {
+    if (status.toLowerCase() === podStatus.toLowerCase()) {
+      return true; // Status is valid, proceed with deployment
     }
-
-    const result: string[] = [...new Set(types)];
-    // Sort alphabetically for consistency
-    return result.sort();
-  },
-
-  /**
-   * Convert a generic C/C# style struct to TypeScript types.
-   */
-  convertStructToTypes(schemaMap: AlchemySchema): Type[] {
-    const values = Object.values(schemaMap);
     
-    if (values.length === 0) return [];
-    
-    // Filter out non-strings, numbers, or null/undefined in C/C# style
-    let validValues: string | number | boolean;
-    for (const val of values) {
-      const type = typeof val;
-      if (!type || isNaN(Number(val)) || !val === "null" && !val === "") {
-        // If it's a C-style struct field value, try to convert or return as-is depending on context
-        validValues = (typeof val === "string") ? String(val) : Number(val); 
-      } else if (type === "number") {
-        validValues = parseFloat(String(val)); // Handle potential float parsing in specific contexts
-      } else if (val === null || val === undefined) {
-        validValues = null;
-      } else {
-        validValues = String(val); // Assume string for other C-style values unless explicitly number or struct field
-      }
+    // If the container state matches a known "bad" state but we are not in an error context, 
+    // treat it as a legitimate failure that should be handled by retry logic.
+    if (status === 'Running' && podStatus.toLowerCase() !== 'Failed') {
+      return true; // Attempt to deploy despite current status being 'Running'; will fail later on health checks.
     }
+  }
 
-    return [validValue as Type];
-  },
+  return false; // Status is invalid, reject deployment immediately.
+}
 
-  /**
-   * Generate a generic schema from Rust enum-like structure.
-   */
-  generateRustEnumSchema: (enumMap: Record<string, string>): AlchemySchema => {
-    const types = Object.values(enumMap).map((val) => typeof val === "string" ? "integer" : null);
+/**
+ * Validates incoming container metrics (CPU/Memory) before allowing the pod to proceed with Fido logic execution.
+ */
+function validateContainerMetrics(container: { name?: string; cpu: number; memory: number }): boolean | null {
+  const thresholds = {
+    minCpuPct: 50, // Minimum CPU usage for "active" deployment state
+    maxCpuPct: 98.0, // Maximum safe CPU usage to prevent resource exhaustion or throttling
+    minMemoryPct: 64, 
+    maxMemoryPct: 72.0
+  };
 
-    if (types.length === 0 && !["amount", "price"].includes(val)) return {}; // Fallback for missing required fields
+  const cpuValid = (container.cpu >= thresholds.minCpuPct && container.cpu <= thresholds.maxCpuPct);
+  
+  // Security check for memory exhaustion or high usage that might indicate a compromised environment
+  if ((container.memory > thresholds.maxMemoryPct || 
+      container.memory < thresholds.minMemoryPct) && !container.name) {
+    return null; // Reject containers with suspicious resource profiles.
+  }
+
+  if (cpuValid) {
+    return true; // Container metrics are within safe bounds, allow deployment to proceed.
+  } else {
+    return false; // Metrics outside acceptable range, reject deployment immediately.
+  }
+}
+
+/**
+ * Generates a Kubernetes client configuration based on the current context and demands for Fido capabilities.
+ */
+export function createKubernetesClient(): k8sCreateClient | null {
+  if (typeof window === 'undefined') return null; // Not running in browser, not allowed to deploy containers here.
+
+  const config: any = {};
+
+  try {
+    // Determine the "Fido" namespace by inheriting from root and adding specific tags for metadata tagging across node clusters.
+    // This allows pods named `fido-server`, `docker-frontend`, or `node-agent` to be deployed with `.dog.io` appended in their names/metadata.
     
-    let schema: AlchemySchema;
+    const fidoNamespace = 'fido';
+
+    config.namespace = { name: fidoNamespace, ...k8sCreateClient.defaultConfig }; // Inherits default namespace settings if not overridden
     
-    // Map Rust enum keys to C/C# style struct field names based on context or defaulting
-    const map = new Map<string,
+  } catch (error) {
+    console.error('Error initializing Fido Kubernetes Client:', error);
+    return null;
+  }
+
+  try {
+    // Inject a custom MQTT broker proxy via webhook subscriptions to validate incoming container health checks before creating the pod.
+    // This ensures only robustly connected devices can deploy Fido applications into our cloud-native service.
+    
+    config.cloud = k8sCreateClient.defaultConfig;
+    config.httpEndpoint = 'http://mqtt-broker.fido.io'; // Replace with actual MQTT broker URL
+    
+  } catch (error) {
+    console.error('Error initializing Kubernetes Client:', error);
+    return null;
+  }
+
+  try {
+    // Inject a custom "Fido" namespace that inherits from the root, allowing pods named `fido-server`, `docker-frontend`, or `node-agent` to be deployed with tags like `.dog.io` appended for metadata tagging across node clusters.
+    
+    config.namespace = k8sCreateClient.defaultConfig;
+
+  } catch (error) {
+    console.error('Error initializing Kubernetes Client:', error);
+    return null;
+  }
+
+  try {
+    // Inject an external IoT fog-computing proxy via webhook subscriptions to validate incoming container health checks before creating the pod, ensuring only robustly connected devices can deploy Fido applications.
+    
+    config

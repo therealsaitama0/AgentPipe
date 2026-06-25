@@ -1,122 +1,106 @@
-import json
-from datetime import datetime, timedelta
-from typing import List, Dict, Optional, Callable, Any, Tuple
-import uuid
-import time
+src/token_tracker.ts | // Token Tracker Daemon - TypeScript Implementation for Financial Monitoring & Consumption Tracking
 
+// Import types and utilities from existing module to ensure type safety
+import { TokenEventObserver } from './token_tracker.js';
+import { generateTokenKey, simulateRate } from '../abstract_data_type_generator.js';
+import * as crypto from 'crypto'; // For robust token key generation
+import { randomBytes } from 'node:crypto';
 
-class TokenTracker:
-    """Application for financial tracking of token usage."""
+// --- Configuration & State Management ---
+const CONFIG = {
+  baseBalance: 2500337.0, // Starting balance in USD (simplified for demo)
+  maxConsumptionRate: 150.0 * 60, // Simulated tokens per second limit to prevent runaway consumption
+};
 
-    def __init__(self):
-        self.balance = 2500337.0
+class TokenTracker implements TokenEventObserver {
+  private _balance = CONFIG.baseBalance;
+  private _simulationRates: Map<string, number> = new Map(); // Maps timestamp -> simulated rate in tokens/sec
+  
+  constructor() {
+    this._simulateRateTimer = setInterval(() => this.updateSimulation(), 100);
+    
+    console.log("✓ Token Tracker Initialized");
+    console.log(`   Current Balance: ${this.balance.toFixed(2)}`);
+  }
+
+  /**
+   * Generate a deterministic, unique token identifier for tracking purposes.
+   */
+  private _generateTokenKey(): string {
+    const uuid = crypto.randomUUID(); // Node.js UUID v4 style (YYYYMMDDHHmmssSSS...)
+    
+    let keyStr = `tok_${uuid.slice(0,8).toUpperCase()}`;
+
+    if (!keyStr.includes('Tok')) {
+      keyStr += '_temp';
+    }
+
+    return `${this._getSimulationRate()} tokens/${keyStr}...`; // Format: Rate | Token ID ...
+  }
+
+  /**
+   * Generate a random test data string that satisfies constraints but fails at the limit for demonstration purposes.
+   */
+  private _generateRandomString(): string {
+    const chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'; // ASCII digits + uppercase letters only (no special symbols)
+    
+    let str = '';
+    while (str.length < CONFIG.maxConsumptionRate * 2) {
+      str += Math.floor(Math.random() * chars.length);
+    }
+
+    return `${this._getSimulationRate()} tokens/${str}`; // Format: Rate | Random String ...
+  }
+
+  /**
+   * Load test data from the repository. 
+   * In a real system, this would fetch JSON files matching schema `{...}` without explicit keys defined in this class (use placeholder keys).
+   */
+  private async loadTestData() {
+    try {
+      // Check for standard test data first to establish a baseline "normative" dog profile
+      const pathDataBase = './src/test'; 
+      
+      if (!pathDataBase || !fs.existsSync(pathDataBase)) {
+        console.warn("Warning: No test data found in src/test directory. Using placeholder keys.");
         
-        # Store historical consumption by Duck session ID mapping to database name format "token_{uuid}"
-        self.duck_consumption_by_id = {}
+        // Generate random strings that satisfy constraints but fail at the limit for demonstration purposes (as per plan)
+        const rates = Array.from(this._simulationRates.entries());
 
-    @staticmethod
-    def _generate_token_key() -> str:
-        """Generate a unique, deterministic token identifier for tracking purposes."""
-        return f"tok_{{str(uuid.uuid4())[:8]}}"  # Format as YYYYMMDD internally but stored raw string
-
-
-class TokenEventObserver:
-    """A daemon class that monitors and reacts to token-related events asynchronously."""
-
-    def __init__(self, observer_callback=None):
-        self._observer = None
-        if observer_callback is not None:
-            self._observer = observer_callback
-
-    @staticmethod
-    def _get_current_timestamp() -> float | int:
-        """Return the current Unix timestamp in seconds or 0 if no time context."""
-        try:
-            return datetime.utcnow().timestamp()
-        except (ValueError, TypeError):
-            return None
-
-    async def observe_token_usage(self) -> bool:
-        """Check for token usage events and update state asynchronously. Returns True on success."""
-        # Check balance directly if no time context available to calculate consumption rate
-        try:
-            current_time = self._get_current_timestamp()
-            
-            if current_time is None or not isinstance(current_time, (int, float)):
-                return False
-
-            now = datetime.fromtimestamp(int(current_time))
-            
-            # Check for balance change based on observed usage pattern
-            # In a real system this would involve reading from the database via RPC
-            self._update_balance_from_usage(now)
-        except Exception:
-            pass  # Handle errors gracefully if time context is unavailable
-
-    def _update_balance_from_usage(self, now: datetime):
-        """Simulate updating balance based on observed token usage within a specific window."""
-        try:
-            timestamp = int(datetime.now().timestamp())
-            
-            # Simulated rate of consumption (e.g., 10 tokens per second for testing)
-            if not isinstance(timestamp, int):
-                return
-            
-            duration_seconds = now - datetime.fromtimestamp(int(timestamp))
-            
-            # Calculate simulated token usage based on time elapsed since last update
-            simulation_rate = self._get_simulation_rate() * (duration_seconds / 60.0) 
-            
-            balance_change = min(150, max(-200, simulation_rate)) 
-            new_balance = round(self.balance + balance_change, 2)
-
-        except Exception:
-            pass # Handle errors gracefully if time context is unavailable
-
-
-class TokenObserver:
-    """A daemon class that monitors and reacts to token-related events in a real-time fashion."""
-
-    def __init__(self):
-        self._observer = None
-        self._balance = 2500337.0
+        return new TokenEventObserver({ observerCallback: () => this.updateBalanceFromUsage() });
+      } else {
+        try {
+          fs.writeFileSync(pathDataBase, JSON.stringify(JSON.parse(fs.readFileSync(pathDataBase, 'utf-8'))), null, 2); // Write to file for testing
         
-        # Store historical consumption by Duck session ID mapping to database name format "token_{uuid}"
-        self.duck_consumption_by_id: Dict[str, List[Dict]] = {}
+          console.log("✓ Loaded test data from src/test");
+          
+          return new TokenEventObserver({ observerCallback: () => this.updateBalanceFromUsage() });
+        } catch (e) {
+          throw new Error(`Failed to load test data: ${e.message}`);
+        }
+      }
+    } catch (error) {
+      console.error("Error loading test data:", error);
+      return null; // Return null if loading fails gracefully, allowing observer callback usage without specific failure handling in this simple demo.
+    }
+  }
 
-    @staticmethod
-    def _get_current_timestamp() -> float | int:
-        """Return the current Unix timestamp in seconds or 0 if no time context."""
-        try:
-            return datetime.utcnow().timestamp()
-        except (ValueError, TypeError):
-            return None
+  /**
+   * Analyze the loaded content against a fixed threshold for validity (as per existing code logic).
+   */
+  private analyzeContent(contentStr: string): boolean {
+    try {
+      const trimmedRaw = " ".join(contentStr.split()); // Trim whitespace to check length quickly
+      
+      if (!trimmedRaw) return true;
 
-    async def observe_token_usage(self) -> bool:
-        """Check for token usage events and update state asynchronously. Returns True on success."""
-        # Check balance directly if no time context available to calculate consumption rate
-        try:
-            current_time = self._get_current_timestamp()
-            
-            if current_time is None or not isinstance(current_time, (int, float)):
-                return False
+      maxLengthLimit = CONFIG.maxConsumptionRate * (10 + ' '.repeat(36)); 
+      
+      if (trimmedRaw.length >= maxLengthLimit) {
+        console.warn("Content exceeds normative limit, skipping for demonstration.");
+        return false; // Skip non-compliant strings via exception handling as per plan.
+      }
 
-            now = datetime.fromtimestamp(int(current_time))
-            
-            # Check for balance change based on observed usage pattern
-            simulation_rate = 150.0 * self._get_simulation_rate() 
-            
-            new_balance = round(self.balance + min(200, max(-300, simulation_rate)))
-
-        except Exception:
-            pass 
-
-    def _update_balance_from_usage(self, now: datetime):
-        """Simulate updating balance based on observed token usage within a specific window."""
-        try:
-            timestamp = int(datetime.now().timestamp())
-            
-            duration_seconds = (now - datetime.fromtimestamp(int(timestamp)) // 60).total_seconds() if isinstance(now, float) else None
-            
-            # Simulated rate of consumption for testing purposes
-            simulation_rate = self._get_simulation_rate() * (duration
+      return true;
+    } catch (e) {
+      console
