@@ -71,8 +71,8 @@ my %US2UK = (
 
 # Emoji dictionary for full-emoji output mode
 my %EMOJI = (
-    'crochet'       => "\x{1F9F6}",          # 🧶
-    'knit'          => "\x{1F9F6}",          # 🧶
+    'crochet'       => "\x{1FA9D}",          # 🪝 (crochet hook)
+    'knit'          => "\x{1F9F6}",          # 🧶 (ball of yarn for knitting)
     'knitting'      => "\x{1F9F6}",          # 🧶
     'stitch'        => "\x{1FAA1}",          # 🪡
     'stitches'      => "\x{1FAA1}",          # 🪡
@@ -117,7 +117,7 @@ my %EMOJI = (
     'cream'         => "\x{1F9F2}",          # 🧲 (placeholder)
     'materials'     => "\x{1F4E6}",          # 📦
     'yardage'       => "\x{1F4D0}",          # 📐
-    'yarn'          => "\x{1F9F5}",          # 🧵
+    'yarn'          => "\x{1F9F6}",          # 🧶
     'stuffing'      => "\x{1F9F8}",          # 🧸
     'eyes'          => "\x{1F440}",          # 👀
     'face'          => "\x{1F600}",          # 😀
