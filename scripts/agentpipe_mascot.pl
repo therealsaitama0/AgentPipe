@@ -57,6 +57,243 @@ my @PARTS = qw(banana goose goblin);
 # Defaults & option parsing
 # ---------------------------------------------------------------------------
 
+# US ↔ UK crochet terminology mapping (knitting terms are identical)
+my %US2UK = (
+    'sc'        => 'dc',       # single crochet → double crochet
+    'hdc'       => 'htr',      # half double crochet → half treble
+    'dc'        => 'tr',       # double crochet → treble
+    'tr'        => 'dtr',      # treble → double treble
+    'sl st'     => 'ss',       # slip stitch → slip stitch
+    'sc2tog'    => 'dc2tog',   # single crochet 2 together
+    'hdc2tog'   => 'htr2tog',  # half double crochet 2 together
+    'dc2tog'    => 'tr2tog',   # double crochet 2 together
+);
+
+# Emoji dictionary for full-emoji output mode
+my %EMOJI = (
+    'crochet'       => "\x{1F9F6}",          # 🧶
+    'knit'          => "\x{1F9F6}",          # 🧶
+    'knitting'      => "\x{1F9F6}",          # 🧶
+    'stitch'        => "\x{1FAA1}",          # 🪡
+    'stitches'      => "\x{1FAA1}",          # 🪡
+    'sts'           => "\x{1FAA1}",          # 🪡
+    'round'         => "\x{2B55}",           # ⭕
+    'rounds'        => "\x{2B55}",           # ⭕
+    'row'           => "\x{1F4CF}",          # 📏
+    'rows'          => "\x{1F4CF}",          # 📏
+    'magic ring'    => "\x{1F9D9}\x{2B55}", # 🧙⭕
+    'increase'      => "\x{1F4C8}",          # 📈
+    'inc'           => "\x{1F4C8}",          # 📈
+    'decrease'      => "\x{1F4C9}",          # 📉
+    'dec'           => "\x{1F4C9}",          # 📉
+    'chain'         => "\x{26D3}\x{FE0F}",   # ⛓
+    'ch'            => "\x{26D3}\x{FE0F}",   # ⛓
+    'hook'          => "\x{1FA9D}",          # 🪝
+    'needle'        => "\x{1F4CC}",          # 📌
+    'needles'       => "\x{1F4CC}",          # 📌
+    'body'          => "\x{1F4AA}",          # 💪
+    'head'          => "\x{1F464}",          # 👤
+    'wing'          => "\x{1F985}",          # 🦅
+    'wings'         => "\x{1F985}",          # 🦅
+    'beak'          => "\x{1F426}",          # 🐦
+    'ear'           => "\x{1F442}",          # 👂
+    'ears'          => "\x{1F442}",          # 👂
+    'tail'          => "\x{1F43A}",          # 🐺
+    'banana'        => "\x{1F34C}",          # 🍌
+    'goose'         => "\x{1F986}",          # 🦆
+    'goblin'        => "\x{1F47A}",          # 👺
+    'colour'        => "\x{1F3A8}",          # 🎨
+    'color'         => "\x{1F3A8}",          # 🎨
+    'colours'       => "\x{1F3A8}",          # 🎨
+    'colors'        => "\x{1F3A8}",          # 🎨
+    'yellow'        => "\x{1F7E1}",          # 🟡
+    'white'         => "\x{26AA}\x{FE0F}",   # ⚪
+    'green'         => "\x{1F7E2}",          # 🟢
+    'orange'        => "\x{1F7E0}",          # 🟠
+    'brown'         => "\x{1F7E4}",          # 🟤
+    'black'         => "\x{26AB}\x{FE0F}",   # ⚫
+    'grey'          => "\x{1F90F}",          # 🤏 (close enough to grey)
+    'gray'          => "\x{1F90F}",          # 🤏
+    'cream'         => "\x{1F9F2}",          # 🧲 (placeholder)
+    'materials'     => "\x{1F4E6}",          # 📦
+    'yardage'       => "\x{1F4D0}",          # 📐
+    'yarn'          => "\x{1F9F5}",          # 🧵
+    'stuffing'      => "\x{1F9F8}",          # 🧸
+    'eyes'          => "\x{1F440}",          # 👀
+    'face'          => "\x{1F600}",          # 😀
+    'smile'         => "\x{1F642}",          # 🙂
+    'mouth'         => "\x{1F444}",          # 👄
+    'around'        => "\x{1F504}",          # 🔄
+    'repeat'        => "\x{1F501}",          # 🔁
+    'fasten off'    => "\x{1F51A}\x{2702}\x{FE0F}", # 🔚✂
+    'fasten'        => "\x{1F51A}",          # 🔚
+    'sew'           => "\x{1FAA1}",          # 🪡
+    'sewing'        => "\x{1FAA1}",          # 🪡
+    'weave'         => "\x{1F9F5}",          # 🧵
+    'block'         => "\x{1F9CA}",          # 🧊
+    'steam'         => "\x{2668}\x{FE0F}",   # ♨
+    'dry'           => "\x{2600}\x{FE0F}",   # ☀
+    'shape'         => "\x{1F3AD}",          # 🎭
+    'finish'        => "\x{1F3C1}",          # 🏁
+    'finishing'     => "\x{1F3C1}",          # 🏁
+    'complete'      => "\x{2705}",           # ✅
+    'make'          => "\x{2795}",           # ➕
+    'leave'         => "\x{1F4A4}",          # 💤
+    'work'          => "\x{1F477}",          # 👷
+    'together'      => "\x{1F91D}",          # 🤝
+    'fold'          => "\x{1F447}",          # 👇
+    'edge'          => "\x{1F5BC}\x{FE0F}",  # 🖼
+    'panel'         => "\x{1F4CB}",          # 📋
+    'taper'         => "\x{25C0}\x{FE0F}",   # ◀
+    'evenly'        => "\x{2696}\x{FE0F}",   # ⚖
+    'gauge'         => "\x{1F4D0}",          # 📐
+    'swatch'        => "\x{1F9F5}",          # 🧵
+    'pattern'       => "\x{1F4DC}",          # 📜
+    'instructions'  => "\x{1F4D6}",          # 📖
+    'instruction'   => "\x{1F4D6}",          # 📖
+    'motif'         => "\x{1F3A8}",          # 🎨
+    'motifs'        => "\x{1F3A8}",          # 🎨
+    'assembly'      => "\x{1F527}",          # 🔧
+    'placement'     => "\x{1F4CD}",          # 📍
+    'marker'        => "\x{1F4CC}",          # 📌
+    'markers'       => "\x{1F4CC}",          # 📌
+    'scissors'      => "\x{2702}\x{FE0F}",   # ✂
+    'tapestry'      => "\x{1FAA1}",          # 🪡
+    'notions'       => "\x{1F9F0}",          # 🧰
+    'beginner'      => "\x{1F530}",          # 🔰
+    'intermediate'  => "\x{1F3AF}",          # 🎯
+    'advanced'      => "\x{1F451}",          # 👑
+    'skill'         => "\x{1F3AF}",          # 🎯
+    'overview'      => "\x{1F50D}",          # 🔍
+    'design'        => "\x{1F3A8}",          # 🎨
+    'height'        => "\x{1F4CF}",          # 📏
+    'cm'            => "\x{1F4D0}",          # 📐
+    'approx'        => "\x{2248}",           # ≈
+    'technique'     => "\x{1F9BE}",          # 🦾
+    'suggested'     => "\x{1F4A1}",          # 💡
+    'main'          => "\x{1F3F3}\x{FE0F}",  # 🏳
+    'accent'        => "\x{2728}",           # ✨
+    'outline'       => "\x{1F3F3}\x{FE0F}",  # 🏳
+    'diameter'      => "\x{1F4D0}",          # 📐
+    'customisation' => "\x{1F3A8}",          # 🎨
+    'expression'    => "\x{1F600}",          # 😀
+    'personality'   => "\x{1F916}",          # 🤖
+    'substitute'    => "\x{1F504}",          # 🔄
+    'recommend'     => "\x{1F44D}",          # 👍
+    'gentle'        => "\x{1F90F}",          # 🤏
+    'lightly'       => "\x{1F90F}",          # 🤏
+    'details'       => "\x{1F50D}",          # 🔍
+    'surface'       => "\x{1F3AF}",          # 🎯
+    'brush'         => "\x{1FAA4}",          # 🪤
+    'add'           => "\x{2795}",           # ➕
+    'use'           => "\x{1F4A1}",          # 💡
+    'work'          => "\x{1F477}",          # 👷
+    'worked'        => "\x{1F477}",          # 👷
+    'attach'        => "\x{1F527}",          # 🔧
+    'attaching'     => "\x{1F527}",          # 🔧
+    'attached'      => "\x{1F527}",          # 🔧
+    'open'          => "\x{1F4C2}",          # 📂
+    'close'         => "\x{1F4C1}",          # 📁
+    'pull'          => "\x{1F447}",          # 👇
+    'tight'         => "\x{1F4AA}",          # 💪
+    'tightly'       => "\x{1F4AA}",          # 💪
+    'position'      => "\x{1F4CD}",          # 📍
+    'top'           => "\x{1F51D}",          # 🔝
+    'bottom'        => "\x{1F53D}",          # 🔽
+    'back'          => "\x{1F519}",          # 🔙
+    'front'         => "\x{1F51A}",          # 🔚
+    'side'          => "\x{1F519}",          # 🔙
+    'sides'         => "\x{1F519}",          # 🔙
+    'centre'        => "\x{1F3AF}",          # 🎯
+    'center'        => "\x{1F3AF}",          # 🎯
+    'centred'       => "\x{1F3AF}",          # 🎯
+    'centered'      => "\x{1F3AF}",          # 🎯
+    'down'          => "\x{1F53D}",          # 🔽
+    'upward'        => "\x{1F53C}",          # 🔼
+    'outward'       => "\x{1F519}",          # 🔙
+    'vertical'      => "\x{1F53D}",          # 🔽
+    'spaced'        => "\x{1F4D0}",          # 📐
+    'below'         => "\x{2B07}\x{FE0F}",   # ⬇
+    'forward'       => "\x{27A1}\x{FE0F}",   # ➡
+    'neatly'        => "\x{2728}",           # ✨
+    'half'          => "\x{00BD}",           # ½
+    'extra'         => "\x{2795}",           # ➕
+    'desired'       => "\x{1F3AF}",          # 🎯
+    'change'        => "\x{1F504}",          # 🔄
+    'changes'       => "\x{1F504}",          # 🔄
+    'carried'       => "\x{1F4E6}",          # 📦
+    'cut'           => "\x{2702}\x{FE0F}",   # ✂
+    'inside'        => "\x{1F4A1}",          # 💡
+    'adjust'        => "\x{1F527}",          # 🔧
+    'needed'        => "\x{1F6A7}",          # 🚧
+    'first'         => "\x{0031}\x{20E3}",   # 1️⃣
+    'second'        => "\x{0032}\x{20E3}",   # 2️⃣
+    'third'         => "\x{0033}\x{20E3}",   # 3️⃣
+    'fourth'        => "\x{0034}\x{20E3}",   # 4️⃣
+    'fifth'         => "\x{0035}\x{20E3}",   # 5️⃣
+    'one'           => "\x{0031}\x{20E3}",   # 1️⃣
+    'two'           => "\x{0032}\x{20E3}",   # 2️⃣
+    'three'         => "\x{0033}\x{20E3}",   # 3️⃣
+    'four'          => "\x{0034}\x{20E3}",   # 4️⃣
+    'five'          => "\x{0035}\x{20E3}",   # 5️⃣
+    'six'           => "\x{0036}\x{20E3}",   # 6️⃣
+    'seven'         => "\x{0037}\x{20E3}",   # 7️⃣
+    'eight'         => "\x{0038}\x{20E3}",   # 8️⃣
+    'nine'          => "\x{0039}\x{20E3}",   # 9️⃣
+    'ten'           => "\x{1F51F}",          # 🔟
+    'make'          => "\x{2795}",           # ➕
+    'part'          => "\x{1F9F0}",          # 🧰
+    'parts'         => "\x{1F9F0}",          # 🧰
+    'order'         => "\x{1F522}",          # 🔢
+    'preparation'   => "\x{1F4E6}",          # 📦
+    'prep'          => "\x{1F4E6}",          # 📦
+    'preparing'     => "\x{1F4E6}",          # 📦
+    'prepared'      => "\x{1F4E6}",          # 📦
+    'stuff'         => "\x{1F9F8}",          # 🧸
+    'firmly'        => "\x{1F4AA}",          # 💪
+    'hidden'        => "\x{1F648}",          # 🙈
+    'angle'         => "\x{1F4CF}",          # 📐
+    'angled'        => "\x{1F4CF}",          # 📐
+    'slightly'      => "\x{1F90F}",          # 🤏
+    'wide'          => "\x{1F4D0}",          # 📐
+    'point'         => "\x{1F3AF}",          # 🎯
+    'placed'        => "\x{1F4CD}",          # 📍
+    'place'         => "\x{1F4CD}",          # 📍
+    'safety'        => "\x{1F6D1}",          # 🛑
+    'thread'        => "\x{1F9F5}",          # 🧵
+    'embroider'     => "\x{1FAA1}",          # 🪡
+    'embroidery'    => "\x{1FAA1}",          # 🪡
+    'embroidered'   => "\x{1FAA1}",          # 🪡
+    'eyebrows'      => "\x{1F9B0}",          # 🦰
+    'nostrils'      => "\x{1F443}",          # 👃
+    'freckles'      => "\x{1F4D0}",          # 📐
+    'feather'       => "\x{1FAB6}",          # 🪶
+    'marks'         => "\x{1F4CC}",          # 📌
+    'neutral'       => "\x{1F610}",          # 😐
+    'soft'          => "\x{1F90F}",          # 🤏
+    'curved'        => "\x{1F4CF}",          # 📐
+    'small'         => "\x{1F90F}",          # 🤏
+    'sharp'         => "\x{1F5E1}\x{FE0F}",  # 🗡
+    'worried'       => "\x{1F61F}",          # 😟
+    'blank'         => "\x{1F636}",          # 😶
+    'mischievous'   => "\x{1F61C}",          # 😜
+    'raised'        => "\x{1F4C8}",          # 📈
+    'wry'           => "\x{1F61B}",          # 😛
+    'cheeky'        => "\x{1F60F}",          # 😏
+    'grin'          => "\x{1F600}",          # 😀
+    'size'          => "\x{1F4D0}",          # 📐
+    'bigger'        => "\x{1F7E2}",          # 🟢
+    'smaller'       => "\x{1F534}",          # 🔴
+    'longer'        => "\x{1F4CF}",          # 📏
+    'rounder'       => "\x{2B55}",           # ⭕
+    'instead'       => "\x{1F504}",          # 🔄
+    'ratio'         => "\x{1F522}",          # 🔢
+    'ratios'        => "\x{1F522}",          # 🔢
+    'details'       => "\x{1F50D}",          # 🔍
+    'extra'         => "\x{2795}",           # ➕
+    'also'          => "\x{2795}",           # ➕
+);
+
 my %opt = (
     banana     => 1,
     goose      => 1,
@@ -68,6 +305,8 @@ my %opt = (
     format     => 'markdown',
     output     => '-',
     skill      => '',
+    terminology => 'us',
+    emoji      => 0,
 );
 
 GetOptions(
@@ -81,6 +320,8 @@ GetOptions(
     'format=s'       => \$opt{format},
     'output=s'       => \$opt{output},
     'skill=s'        => \$opt{skill},
+    'terminology=s'  => \$opt{terminology},
+    'emoji!'         => \$opt{emoji},
     'help'           => \$opt{help},
 ) or usage(1);
 
@@ -103,6 +344,10 @@ die "At least one ratio must be > 0.\n" if $total_ratio <= 0;
 $opt{format} = lc $opt{format};
 die "Format must be markdown, text, or html.\n"
     unless $opt{format} =~ /^(markdown|text|html)$/;
+
+$opt{terminology} = lc $opt{terminology};
+die "Terminology must be 'us' or 'uk'.\n"
+    unless $opt{terminology} eq 'us' || $opt{terminology} eq 'uk';
 
 # Derived values
 my %ratio = map { $_ => $opt{$_} / $total_ratio } @PARTS;
@@ -130,9 +375,10 @@ my $cast_on = 6;
 
 my $out_fh;
 if ($opt{output} && $opt{output} ne '-') {
-    open $out_fh, '>', $opt{output} or die "Cannot write $opt{output}: $!\n";
+    open $out_fh, '>:utf8', $opt{output} or die "Cannot write $opt{output}: $!\n";
 } else {
     $out_fh = \*STDOUT;
+    binmode STDOUT, ':utf8';
 }
 
 my $out = sub {
@@ -140,16 +386,20 @@ my $out = sub {
     print $fh $text;
 };
 
+my $output = '';
 if ($opt{format} eq 'html') {
-    print $out_fh html_header($opt{name});
+    $output .= html_header($opt{name});
     my $md = generate_markdown($profile, \%ratio, $dominant);
-    print $out_fh md_to_html($md, $opt{name});
-    print $out_fh html_footer();
+    $output .= md_to_html($md, $opt{name});
+    $output .= html_footer();
 } elsif ($opt{format} eq 'text') {
-    print $out_fh generate_text($profile, \%ratio, $dominant);
+    $output .= generate_text($profile, \%ratio, $dominant);
 } else {
-    print $out_fh generate_markdown($profile, \%ratio, $dominant);
+    $output .= generate_markdown($profile, \%ratio, $dominant);
 }
+
+$output = translate_output($output);
+print $out_fh $output;
 
 close $out_fh if $opt{output} && $opt{output} ne '-';
 
@@ -835,6 +1085,100 @@ sub md_to_html {
 }
 
 # ---------------------------------------------------------------------------
+# Translation / localisation
+# ---------------------------------------------------------------------------
+
+sub translate_output {
+    my ($text) = @_;
+
+    if ($opt{terminology} eq 'uk' && $opt{craft} eq 'crochet') {
+        my @terms = sort { length($b) <=> length($a) } keys %US2UK;
+        for my $us (@terms) {
+            my $uk = $US2UK{$us};
+            $text =~ s/\b\Q$us\E\b/$uk/gi;
+        }
+    }
+
+    if ($opt{emoji}) {
+        $text = emojify_text($text);
+    }
+
+    return $text;
+}
+
+sub emojify_text {
+    my ($text) = @_;
+
+    $text =~ s/\*\*(.+?)\*\*/emojify_inline($1)/ge;
+    $text =~ s/\*(.+?)\*/emojify_inline($1)/ge;
+    $text =~ s/`(.+?)`/emojify_inline($1)/ge;
+
+    my @lines = split /\n/, $text;
+    for my $line (@lines) {
+        next if $line =~ /^\s*$/;
+        next if $line =~ /^---/;
+        next if $line =~ /^\|[-| ]+\|$/;
+        next if $line =~ /^#/;
+        $line =~ s/(\d+)\.(\s+)/$1$2/g;
+        $line = emojify_line($line);
+    }
+    $text = join "\n", @lines;
+
+    return $text;
+}
+
+sub emojify_inline {
+    my ($text) = @_;
+    $text = emojify_line($text);
+    return $text;
+}
+
+sub emojify_line {
+    my ($line) = @_;
+
+    $line =~ s/(\d+\.?\d*)\s*mm\b/$1\x{1F4D0}/g;
+    $line =~ s/(\d+\.?\d*)\s*cm\b/$1\x{1F4D0}/g;
+    $line =~ s/(\d+\.?\d*)\s*m\b/$1\x{1F4D0}/g;
+    $line =~ s/(\d+)\s*\%/$1%\x{FE0F}/g;
+    $line =~ s/(\d+)\s*g\b/$1 g/g;
+
+    my @words = split /(\s+)/, $line;
+    for my $w (@words) {
+        next if $w =~ /^\s+$/;
+        next if $w =~ /^[|:\-*#`_]+$/;
+
+        my $clean = lc $w;
+        $clean =~ s/[^a-z0-9]//g;
+
+        if (exists $EMOJI{$clean}) {
+            $w = $EMOJI{$clean};
+        } elsif ($clean =~ /^(\d+)$/ && length($clean) <= 2) {
+            $w = number_to_emoji($1);
+        } elsif ($clean =~ /^(a|an|the|in|on|at|to|for|of|and|or|is|are|be|by|as|with|from|but|not|so|if|do|it|all|will|can|each|that|this|they|them|these|those)$/) {
+            $w = '';
+        }
+    }
+
+    $line = join '', @words;
+    $line =~ s/\x{1F4D0}\s*\x{1F4D0}/\x{1F4D0}/g;
+
+    $line =~ s/^\s+//;
+    $line =~ s/\s+$//;
+
+    return $line;
+}
+
+sub number_to_emoji {
+    my ($num) = @_;
+    my @digits = split '', $num;
+    my $out = '';
+    for my $d (@digits) {
+        $out .= chr(0x30 + $d) . "\x{20E3}";
+    }
+    return $out;
+}
+
+# ---------------------------------------------------------------------------
 # Usage
 # ---------------------------------------------------------------------------
 
@@ -857,6 +1201,8 @@ Options:
   --format F        Output format: markdown, text, html (default: markdown)
   --output FILE     Write to file instead of stdout
   --skill LEVEL     Override skill level: beginner, intermediate, advanced
+  --terminology T   Crochet term dialect: us (single crochet, dc) or uk (dc, tr) (default: us)
+  --emoji           Express the entire output document in emoji (default: off)
   --help            Show this help
 
 Examples:
@@ -864,6 +1210,8 @@ Examples:
   perl agentpipe_mascot.pl --craft knit --yarn-weight worsted --scale 1.25
   perl agentpipe_mascot.pl --format html --output mascot.html
   perl agentpipe_mascot.pl --banana 0 --goose 3 --goblin 1 --craft knit
+  perl agentpipe_mascot.pl --terminology uk
+  perl agentpipe_mascot.pl --emoji
 
 The output is a complete pattern document with:
   - Row-by-row stitch instructions with a progress tracker
