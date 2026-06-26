@@ -4,12 +4,13 @@ The `Goose.sc` file implements a highly realistic and performant `Goose` class f
 
 ## Methods
 
-- `Goose.honk(out: 0, amp: 0.5, dur: 5.0, spread: 0.8)`
-  - Synthesizes the sound of **exactly 74 geese** honking.
-  - Utilizes a combination of `SyncSaw` based syllabic cores and breath noise for a rich, reedy tone.
-  - Formant filtering (`BPF`) accurately emulates waterfowl vocal tracts.
-  - `74.collect` instantiates precisely 74 distinct, spatially distributed geese.
-  - An initial `Impulse` synchronizes the flock's first honk, followed by randomized `Dust` triggers for organic flock dynamics.
+- `Goose.honk(out: 0, amp: 0.5, gate: 1, trumpetize: 0.0, spread: 0.8)`
+  - Synthesizes the sound of **exactly 74 geese** honking or trumpeting.
+  - The `trumpetize` parameter dynamically interpolates the synthesis from a goose honk (`0.0`) to a goose playing a trumpet (`1.0`).
+  - Utilizes a combination of `SyncSaw` based syllabic cores for geese, and envelope-modulated `Saw` waves for trumpets.
+  - Formant filtering (`BPF` and `LPF`) emulates waterfowl vocal tracts and brass acoustics respectively.
+  - Features a dynamic **fatigue model**: each voice periodically cycles between activity and rest (tiredness), so they will call indefinitely but automatically pause to rest, desynchronized from one another.
+  - The synth runs indefinitely (using an ASR envelope controlled by the `gate` argument) until explicitly released (`gate: 0` or freed).
 
 - `Goose.honkify(input, morph: 1.0)`
   - Employs Spectral Modeling Synthesis (SMS) to transmute any input audio into a goose honk.
@@ -18,7 +19,7 @@ The `Goose.sc` file implements a highly realistic and performant `Goose` class f
     - **Noise Profile**: Smeared (`PV_MagSmear`) to mimic the breathy hiss of a goose.
     - **Overtone Profile**: Shifted and stretched (`PV_MagShift`) to simulate the resonances of a tighter, avian vocal tract.
   - `PV_Add` recombines the deterministic and stochastic spectral components in the frequency domain.
-  - Pitch-tracked `Resonz` formants apply the final "je ne sais quoi".
+  - Pitch-tracked `Resonz` formants apply the final "je ne sais quoi" (waterfowl resonances cited in literature).
 
 ## Installation
 
@@ -27,10 +28,17 @@ The `Goose.sc` file implements a highly realistic and performant `Goose` class f
 
 ## Examples
 
-Synthesize the 74-goose flock:
+Synthesize the 74-goose flock playing indefinitely with morphable trumpet characteristics:
 ```supercollider
 s.boot;
-Goose.honk(dur: 8.0);
+// Start the flock, 30% trumpet-like
+x = Goose.honk(trumpetize: 0.3);
+
+// Dynamically morph them fully into trumpets!
+x.set(\trumpetize, 1.0);
+
+// Release the flock
+x.set(\gate, 0);
 ```
 
 Morph an audio input (honkify):
@@ -44,5 +52,5 @@ SynthDef(\gooseMic, { |inBus = 0, out = 0|
 )
 
 // Start the synth
-x = Synth(\gooseMic);
+y = Synth(\gooseMic);
 ```
