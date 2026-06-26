@@ -62,6 +62,8 @@ Features:
 - Specific colour palette and yardage estimates per motif
 - Motif parts: banana peel panels, wings, beak, ears/hornlets, tail
 - Assembly guide with placement diagrams and face embroidery suggestions
+- **UK/US terminology**: `--terminology uk` for UK crochet terms (dc, tr, etc.)
+- **Emoji mode**: `--emoji` for a full emoji-expressed document
 - Scales from 10 cm to 50+ cm with `--scale`
 
 See `perl scripts/agentpipe_mascot.pl --help` for all options.
