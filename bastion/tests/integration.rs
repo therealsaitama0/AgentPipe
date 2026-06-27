@@ -1,2 +1,2 @@
 #[cfg(test)]
-mod integration;
+pub mod integration;
