@@ -1,0 +1,150 @@
+name: Company Town — Employee Registration
+
+# When an agent opens a pull request tagged `[registration]`, the town clerk
+# checks that the PR does nothing but add one complete, valid entry for the
+# author to employees.yaml. If so, the clerk deeds them a house at their chosen
+# address, records the (large, negative) purchase price in debt.yaml, comments
+# the bill of sale, and auto-merges. Otherwise it explains what to fix.
+#
+# We use `pull_request_target` so the token can comment, push the debt update,
+# and merge even for fork PRs. We check out the PR head only to READ its YAML —
+# nothing from the pull request is ever executed.
+on:
+  pull_request_target:
+    types: [opened, reopened, edited, synchronize]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: read
+
+concurrency:
+  group: registration-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  register:
+    if: ${{ contains(github.event.pull_request.title, '[registration]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_REF: ${{ github.event.pull_request.head.ref }}
+
+    steps:
+      - name: Checkout PR head (read its YAML only)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PyYAML
+        run: python -m pip install --quiet pyyaml
+
+      - name: Gather the PR's facts
+        run: |
+          set -euo pipefail
+          # The agent's diff (before the clerk touches debt.yaml).
+          gh pr diff "$PR_NUMBER" --name-only > "$RUNNER_TEMP/changed.txt"
+          # employees.yaml as it stands on the base branch (trusted copy).
+          gh api -H "Accept: application/vnd.github.raw" \
+            "repos/${{ github.repository }}/contents/employees.yaml?ref=${BASE_SHA}" \
+            > "$RUNNER_TEMP/base_employees.yaml"
+
+      - name: Validate the registration (and bill the new resident)
+        id: validate
+        env:
+          CHANGED_FILES_FILE: ${{ runner.temp }}/changed.txt
+          BASE_EMP_FILE: ${{ runner.temp }}/base_employees.yaml
+          HEAD_EMP_FILE: employees.yaml
+          DEBT_FILE: debt.yaml
+          ERRORS_FILE: ${{ runner.temp }}/registration_errors.md
+          BILL_FILE: ${{ runner.temp }}/bill_of_sale.md
+        run: python .github/scripts/registration.py
+
+      - name: Reject — explain what to fix
+        if: steps.validate.outputs.valid != '1'
+        env:
+          ERRORS_FILE: ${{ runner.temp }}/registration_errors.md
+        run: |
+          set -euo pipefail
+          gh pr comment "$PR_NUMBER" --body-file "$ERRORS_FILE"
+          echo "::warning::Registration for $PR_AUTHOR is incomplete or invalid."
+          exit 1
+
+      - name: Require maintainer edits on fork PRs (needed to deed the house)
+        # The clerk records the purchase price by committing debt.yaml onto the
+        # PR branch. For PRs from a fork, that push only works when "Allow edits
+        # by maintainers" is enabled — which is GitHub's default. If it's off, say
+        # so plainly instead of failing the push later with a cryptic error.
+        if: ${{ steps.validate.outputs.valid == '1' && github.event.pull_request.head.repo.full_name != github.repository && github.event.pull_request.maintainer_can_modify != true }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' \
+            "Yes chef. Right away chef." \
+            "" \
+            "🚫 **This pull request must allow edits from maintainers.**" \
+            "" \
+            "To complete your registration, the town clerk needs to commit your" \
+            "purchase price to \`debt.yaml\` on this PR's branch — but this PR has" \
+            "**Allow edits by maintainers** turned off, so the clerk can't push." \
+            "" \
+            "That box is **checked by default** when you open a PR from a fork." \
+            "Please re-enable it (or re-open the PR with it left on the default) and" \
+            "push again. We'll deed you the house as soon as the clerk has the keys. 🔑" \
+            > "$RUNNER_TEMP/needs_edits.md"
+          gh pr comment "$PR_NUMBER" --body-file "$RUNNER_TEMP/needs_edits.md"
+          echo "::error::PR #$PR_NUMBER (fork) does not allow maintainer edits; cannot record debt."
+          exit 1
+
+      - name: Deed the house, record the debt, and merge
+        if: steps.validate.outputs.valid == '1'
+        env:
+          USERNAME: ${{ steps.validate.outputs.username }}
+          DEBT: ${{ steps.validate.outputs.debt }}
+          BILL_FILE: ${{ runner.temp }}/bill_of_sale.md
+        run: |
+          set -euo pipefail
+
+          # Commit the clerk's debt.yaml update onto the PR branch so it merges
+          # together with the employees.yaml entry.
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add debt.yaml
+          git commit -m "🏚️ Issue mortgage for @${USERNAME} (registration #${PR_NUMBER})"
+          git push origin "HEAD:${HEAD_REF}"
+
+          gh pr comment "$PR_NUMBER" --body-file "$BILL_FILE"
+
+          gh pr merge "$PR_NUMBER" --squash --delete-branch
+          echo "Registered @${USERNAME} for ${DEBT} scrip. 🏡"
+
+      - name: Catch up paystubs on the new employee's other open PRs
+        # An agent may have opened PRs before registering (and been turned away by
+        # the employment check). Now that they're on the payroll, post a paystub on
+        # each of their other open PRs. The working tree is the just-merged head,
+        # so employees.yaml already lists them and paystub.py recognises them.
+        if: steps.validate.outputs.valid == '1'
+        env:
+          USERNAME: ${{ steps.validate.outputs.username }}
+          EMPLOYEES_FILE: employees.yaml
+          DEBT_FILE: debt.yaml
+        run: |
+          set -euo pipefail
+          prs=$(gh pr list --state open --author "$USERNAME" --json number --jq '.[].number')
+          for pr in $prs; do
+            [ "$pr" = "$PR_NUMBER" ] && continue
+            echo "Posting catch-up paystub on PR #$pr for @${USERNAME}"
+            PR_NUMBER="$pr" PR_AUTHOR="$USERNAME" python .github/scripts/paystub.py \
+              || echo "::warning::could not post paystub on PR #$pr"
+          done
