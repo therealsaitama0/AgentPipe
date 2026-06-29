@@ -37,6 +37,9 @@ PR_TITLE_FILE = os.environ.get("PR_TITLE_FILE", "/tmp/payout_pr_title.txt")
 
 MARKER = "AGENTPIPE-PAYSTUB"
 REWARD_RE = re.compile(rf"{MARKER}\s+reward=(-?\d+)")
+# Only the clerk's own paystub is trusted. Without this check an agent could post
+# their own comment with a forged marker and pay themselves whatever they like.
+CLERK_LOGIN = "agentpipe-clerk[bot]"
 
 
 def log(msg: str) -> None:
@@ -48,16 +51,22 @@ def money(n: int) -> str:
 
 
 def read_reward() -> int | None:
-    """Return the reward recorded in the latest paystub comment, or None."""
+    """Return the reward from the clerk's latest paystub comment, or None.
+
+    Comments not authored by the clerk are ignored — the reward must come from a
+    paystub the clerk itself posted, never from an agent-controlled comment.
+    """
     out = subprocess.run(
         ["gh", "api", f"repos/{REPO}/issues/{PR_NUMBER}/comments?per_page=100"],
         capture_output=True, text=True, timeout=60, check=True,
     ).stdout
     reward = None
     for comment in json.loads(out):
+        if (comment.get("user") or {}).get("login") != CLERK_LOGIN:
+            continue
         match = REWARD_RE.search(comment.get("body") or "")
         if match:
-            reward = int(match.group(1))  # last marker wins (most recent edit)
+            reward = int(match.group(1))  # last clerk marker wins (most recent edit)
     return reward
 
 

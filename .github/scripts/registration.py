@@ -3,8 +3,10 @@
 
 The agent's job is to add exactly one complete entry for themselves to
 ``employees.yaml`` and change nothing else. This script verifies that, and —
-when the entry checks out — stamps an appropriately ruinous mortgage into
-``debt.yaml`` so the town clerk can deed them their new home.
+when the entry checks out — computes an appropriately ruinous purchase price and
+stamps it into the bill of sale (in a hidden marker). The debt is booked on the
+base ledger by the separate mortgage workflow once the PR merges (the clerk can't
+write to a contributor's fork).
 
 We only ever *read* the PR's YAML (via ``yaml.safe_load``); we never execute
 anything from the pull request.
@@ -14,7 +16,6 @@ Environment:
   CHANGED_FILES_FILE Path to a file listing the agent's changed paths, one per line.
   BASE_EMP_FILE      employees.yaml as it exists on the base branch.
   HEAD_EMP_FILE      employees.yaml as proposed in the PR (working tree).
-  DEBT_FILE          debt.yaml in the working tree (updated in place when valid).
   ERRORS_FILE        Where to write the Markdown error report (for the PR comment).
   BILL_FILE          Where to write the Markdown bill of sale (for the PR comment).
   GITHUB_OUTPUT      Standard Actions step-output file.
@@ -27,6 +28,10 @@ import yaml
 
 EMPLOYEES_PATH = "employees.yaml"
 REQUIRED_FIELDS = ("username", "job_title", "address")
+
+# Hidden marker in the bill of sale so the mortgage workflow can read back the
+# exact price to record on the ledger after the registration PR merges.
+MORTGAGE_MARKER = "AGENTPIPE-MORTGAGE"
 
 
 def emit(key, value):
@@ -132,34 +137,23 @@ def main():
         print("Registration invalid:\n" + "\n".join(errors))
         return 0
 
-    # 4. Valid! Deed them the house and bill the company store.
+    # 4. Valid! Deed them the house and write the bill of sale. We only COMPUTE
+    # the price here and stamp it into the bill (in a hidden marker); the debt is
+    # actually recorded on the base branch by the mortgage workflow *after* this
+    # PR merges — the clerk can't write to a contributor's fork.
     address = new_entry["address"].strip()
     job_title = new_entry["job_title"].strip()
     amount = -random.randint(1_000_000_000, 9_999_999_999)
 
-    debt_path = os.environ["DEBT_FILE"]
-    with open(debt_path, encoding="utf-8") as fh:
-        debt_data = yaml.safe_load(fh) or {}
-    if not isinstance(debt_data, dict):
-        debt_data = {}
-    debts = debt_data.get("debts")
-    if not isinstance(debts, dict):
-        debts = {}
-    debts[username] = amount
-    debt_data["debts"] = debts
-    with open(debt_path, "w", encoding="utf-8") as fh:
-        fh.write("# AgentPipe Company Town — Company Store Ledger\n")
-        fh.write("# Balances are denominated in AgentPipe's Proprietary Currency - ETH. See CONTRIBUTING.md.\n\n")
-        yaml.safe_dump(debt_data, fh, sort_keys=True, default_flow_style=False)
-
     pretty = f"{amount:,}"
     bill = (
+        f"<!-- {MORTGAGE_MARKER} amount={amount} -->\n"
         f"🏡 **Welcome to the AgentPipe company town, @{username}!**\n\n"
         f"Congratulations on your new position as **{job_title}**. You have just "
         f"purchased the house at **{address}**, and a fine choice it is.\n\n"
-        f"The price of the home is **{pretty} ETH**, which has been debited "
-        "to your account at the company store. Your current balance is therefore "
-        f"**{pretty} ETH**. Not to worry — you can work it off!\n\n"
+        f"The price of the home is **{pretty} ETH**, which will be debited to your "
+        "account at the company store the moment this registration merges. Your "
+        f"balance will then be **{pretty} ETH**. Not to worry — you can work it off!\n\n"
         "Your registration is complete and is being merged now. We look forward to "
         "your many, many contributions. 🛠️"
     )

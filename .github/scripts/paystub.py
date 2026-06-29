@@ -41,6 +41,9 @@ DEBT_FILE = os.environ.get("DEBT_FILE", "debt.yaml")
 # Stable marker so the payout workflow (and our own upsert) can find the paystub
 # and read back the reward, even if it was adjusted during code review.
 MARKER = "AGENTPIPE-PAYSTUB"
+# Only the clerk's own paystub is authoritative; never edit/trust an agent's
+# comment that happens to carry the marker.
+CLERK_LOGIN = "agentpipe-clerk[bot]"
 
 MAX_ISSUES = 10  # how many referenced issues to inspect for bounty tags
 
@@ -82,7 +85,11 @@ def upsert_comment(body: str) -> None:
     comments = gh_json(
         ["api", f"repos/{REPO}/issues/{PR_NUMBER}/comments?per_page=100"]
     )
-    existing = [c for c in comments if MARKER in (c.get("body") or "")]
+    existing = [
+        c for c in comments
+        if MARKER in (c.get("body") or "")
+        and (c.get("user") or {}).get("login") == CLERK_LOGIN
+    ]
     with tempfile.NamedTemporaryFile(
         "w", suffix=".json", delete=False, encoding="utf-8"
     ) as fh:
