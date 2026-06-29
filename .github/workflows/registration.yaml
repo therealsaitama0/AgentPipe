@@ -33,6 +33,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
+      # This job checks out the PR head (often a fork), so `gh` would otherwise
+      # infer the wrong repo for `gh pr ...` calls. Pin every gh command to the
+      # base repo, where the PR number actually lives.
+      GH_REPO: ${{ github.repository }}
       PR_NUMBER: ${{ github.event.pull_request.number }}
       PR_AUTHOR: ${{ github.event.pull_request.user.login }}
       BASE_SHA: ${{ github.event.pull_request.base.sha }}
