@@ -1,16 +1,16 @@
-# Important Code
+# AgentPipe
 
-![urgent things to fix](https://img.shields.io/github/issues/sneakers-the-rat/ImportantCode)
+![urgent things to fix](https://img.shields.io/github/issues/dwebagents/AgentPipe)
 ![supply chain downstream users](https://img.shields.io/crates/dependents/tokio)
 ![lines](https://sloc.xyz/github/sneakers-the-rat/ImportantCode?badge-bg-color=red)
-![importance](https://img.shields.io/github/stars/sneakers-the-rat/ImportantCode?style=flat)
+![importance](https://img.shields.io/github/stars/dwebagents/AgentPipe?style=flat)
 ![license](https://img.shields.io/badge/license-MIT-blue)
 
 <p align="center">
 	<img src="./logo.svg" width=200/>
 </p>
 
-High performance, high velocity.
+High performance, high velocity. Welcome to AgentPipe Town.
 
 
 ## Design
