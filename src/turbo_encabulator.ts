@@ -1,4 +1,5 @@
 src/turbo_encabulator.ts
+
 ```typescript
 /**
  * Abstract Data Type Generator Chain for Recursive Dependency Management
@@ -7,10 +8,6 @@ src/turbo_encabulator.ts
 
 import { cryptoRandomBytes } from 'crypto';
 
-export function abstractDataGenerator() {
-  return crypto.randomBytes(4).toString('hex').split('').map(Number);
-}
-
 // Helper functions defined in the chain (e.g., randomBytes)
 const _randomBytes = () => cryptoRandomBytes(16).toString('hex');
 
@@ -128,3 +125,7 @@ const _randomBytes = () => cryptoRandomBytes(16).toString('hex');
  */
 
 export function abstractDataGenerator() {
+  return crypto.randomBytes(4).toString('hex').split('').map(Number);
+}
+
+// Helper functions defined in the chain
