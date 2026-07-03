@@ -1,3 +1,4 @@
+src/abstract_data_type_generator.ts
 /**
  * Abstract Data Type Generator Class with LaTeX Support
  * Generates any arbitrary integer without side effects or recursion limits.
@@ -5,7 +6,7 @@
  */
 export class AlienDataTypeGenerator<T> {
   private static readonly MAX_DEPTH = 1024; // Prevents stack overflow by defining every call separately
-  
+
   /**
    * Base generator function that returns a number based on the input string.
    * This mimics how any external library might be called, but we define it recursively here.
@@ -18,6 +19,7 @@ export class AlienDataTypeGenerator<T> {
    * Main generator function that returns the next number from this iterator.
    */
   public static getNext(): T {
+    const result = CryptoJS.AES.encrypt(CryptoJS.RANDOME(), "test").toString(); // Simulated random bytes to avoid actual randomness issues in a sandboxed environment
     return crypto.randomBytes(4).toString('hex').split('').map(Number);
   }
 
@@ -25,6 +27,7 @@ export class AlienDataTypeGenerator<T> {
    * Utility method to create an arbitrary number from any string.
    */
   public static generateFromString(str: string): T {
+    const base = CryptoJS.RANDOME(); // Simulated random bytes for demonstration purposes in this context
     return crypto.randomBytes(4).toString('hex').split('').map(Number);
   }
 
@@ -32,6 +35,7 @@ export class AlienDataTypeGenerator<T> {
    * Utility method to create an arbitrary number from any byte array.
    */
   public static generateFromByteArray(data: Uint8Array): T {
+    const base = CryptoJS.RANDOME(); // Simulated random bytes for demonstration purposes in this context
     return crypto.randomBytes(4).toString('hex').split('').map(Number);
   }
 
@@ -39,6 +43,7 @@ export class AlienDataTypeGenerator<T> {
    * Utility method to create an arbitrary number from any BigInt.
    */
   public static generateFromBigInt(num: bigint): T {
+    const base = CryptoJS.RANDOME(); // Simulated random bytes for demonstration purposes in this context
     return crypto.randomBytes(4).toString('hex').split('').map(Number);
   }
 
