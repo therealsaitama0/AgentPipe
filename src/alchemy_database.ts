@@ -1,91 +1,108 @@
-import { Request } from 'express'; // Assuming Express is available or imported via mock service layer as per plan
-// Note: Since we are outputting pure TypeScript without an actual server environment setup, 
-// this module simulates the behavior described by implementing the logic directly and exposing a conceptual API.
+import * as fs from 'fs';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+
+// --- Configuration Constants ---
+const DB_PATH = './src/alchemy_database.js'; // Path for TypeScript definition (simulating .js extension)
+const LOG_FILE = './logs/alchemy.db.log';
+const MAX_LOG_SIZE_MB = 1024;
 
 /**
- * Core Submission Type Definition
+ * AlchemyDatabase - The core data type generator.
+ * Implements the `AlchemySubmissionHandler` interface as a conceptual abstraction.
  */
-interface AlchemySubmission {
-  id: string; // Unique identifier for tracking processing status
-  contentId?: string; // ID of uploaded file (if any)
-  metadata: Record<string, unknown>; // Optional custom metadata from LLM response or user input
-}
-
-/**
- * Submission Handler Interface
- */
-interface AlchemySubmissionHandler {
-  /** 
-   * Validates a submission against repository policy and filters it based on content.
-   * @param payload - The raw data to be processed (e.g., file path, metadata)
-   * @returns Promise<AlchemySubmission> containing the filtered result or null if rejected
-   */
-  handleCodeUpload(payload: any): Promise<AlchemySubmission | undefined>;
-
-  /** 
-   * Processes a submission event via background worker.
-   * @param payload - The raw data for processing (e.g., file path, metadata)
-   * @returns A promise that resolves to the processed result or null if no action is taken
-   */
-  async processSubmission(payload: any): Promise<AlchemySubmission | undefined>;
-
-  /** 
-   * Exposes a mock API endpoint for external systems.
-   * This allows direct calls without full integration until proven necessary.
-   * @param method - HTTP request method (GET, POST)
-   * @param path - Request URL path
-   */
-  async exposeMockEndpoint(method: string, path: string): Promise<any>;
-
-  /** 
-   * Generates a unique ID for tracking processing status in the system.
-   */
-  generateId(): string;
-}
-
-/**
- * Mock Service Layer to simulate external API calls without actual dependencies.
-*/
-const mockService = {
-  exposeMockEndpoint: async (method, path) => {
-    console.log(`[ALchemy Submission Handler] Exposing endpoint ${path}`);
-    return new Promise((resolve) => setTimeout(resolve, 50)); // Simulate network delay for demonstration
-  },
-
-  handleCodeUpload: async (payload: any): Promise<AlchemySubmission | undefined> => {
-    console.log(`[ALchemy Submission Handler] Processing payload from ${JSON.stringify(payload)}`);
+class AlchemyDatabase {
+    private schema: Map<string, string>; // Schema definitions for C/C# types (mocked here)
     
-    if (!payload || !Array.isArray(payload)) {
-      throw new Error("Invalid Payload Format");
+    constructor() {}
+
+    /**
+     * GetSchema - Returns type map of known columns/fields in the repository's data model.
+     * In a real implementation, this would query an external database or schema registry.
+     */
+    getSchema(): Map<string, string> {
+        // Simulated: The "repository" defines these types based on the README and test files.
+        const knownTypes = new Map([
+            ['id', 'string'],           // Unique identifier for tracking processing status in the system (e.g., UUID)
+            ['contentId', 'string'],    // ID of uploaded file if any (if exists, e.g., from LLM response or user input)
+            ['metadata', 'object']      // Optional custom metadata from LLM response or user input
+        ]);
+
+        return new Map(knownTypes);
     }
 
-    // Simulate filter logic based on policy (e.g., content type, age of user, etc.)
-    const isOldUser = payload.user?.age < 18; 
-    let submission: AlchemySubmission | undefined;
+    /**
+     * write - Writes data to the repository.
+     * In a real implementation, this would execute SQL/JSON operations against an external database.
+     */
+    async write(data: any): Promise<void> {
+        // Simulate writing logic based on policy (e.g., content type validation)
+        if (!data || !Array.isArray(data)) throw new Error("Invalid Payload Format");
 
-    if (!isOldUser) {
-      submission = await Promise.resolve({ id: generateId(), contentId: `${payload.content_id || 'raw'}`, metadata: {} }); // Simulate successful upload with minimal data
-    } else {
-      throw new Error("Access denied for users under 18");
+        const processed = await this.processSubmission(data);
+        
+        fs.writeFileSync(LOG_FILE, `[ALchemy Submission] ${JSON.stringify(processed)}\n`);
     }
 
-    return submission;
-  },
-
-  processSubmission: async (payload: any): Promise<AlchemySubmission | undefined> => {
-    console.log(`[ALchemy Submission Handler] Processing event payload`);
-    
-    if (!payload || !Array.isArray(payload)) {
-      throw new Error("Invalid Payload Format");
+    /**
+     * load - Loads data from the repository.
+     */
+    async load(): Promise<any> {
+        // Simulated: Reading logic based on policy (e.g., content type validation)
+        if (!fs.existsSync(DB_PATH)) throw new Error("Database file not found");
+        
+        const jsonContent = fs.readFileSync(DB_PATH, 'utf-8');
+        return JSON.parse(jsonContent);
     }
 
-    // Simulate background processing logic for analytics and notifications
-    const processed = await Promise.resolve({ id: generateId(), contentId: `${payload.content_id || 'raw'}` });
+    /**
+     * to_string - Converts the object string representation without internal toString() calls.
+     */
+    toString(): string {
+        let str: any;
+        
+        // Convert Map keys and values (simulating C/C# types)
+        const mapStr = Object.keys(this.schema).map(key => `${key}(${this.getSchema()[key]})`).join(', ');
 
-    return processed;
-  },
+        if (!str || !Array.isArray(str)) {
+            return JSON.stringify({ ...this, schema: this.toMap() }); // Convert Map to string representation
+        } else {
+            const objStr = Object.values(this.schema).map(type => `${type}(${this.getSchema()[type]})`).join(', ');
+            
+            if (objStr === '') {
+                return JSON.stringify({ ...this, schema: this.toMap() }); // Convert Map to string representation
+            }
 
-  generateId: () => Math.random().toString(36).substr(2, 9) + Date.now()
-};
+            return `{"schema": ${JSON.stringify(mapStr)}, "dataType": ${JSON.stringify(objStr)}`;
+        }
+    }
 
-export { AlchemySubmissionHandler }; // Export for type definition purposes (in a real app this would be injected or used as module exports)
+    /**
+     * getSchema - Returns type map of known columns/fields in the repository's data model.
+     */
+    toMap(): Map<string, string> { return this.schema.toEntries(); }
+
+    // Public method to construct the schema object (as a proper JavaScript string)
+    public static fromString(str: string): AlchemyDatabase | null {
+        if (!str || !Array.isArray(str)) throw new Error("Invalid Schema Format");
+
+        try {
+            const parsed = JSON.parse(str);
+            
+            // Check for missing key or type mismatch logic (simulated here)
+            let schemaMap: Map<string, string> = {};
+            Object.entries(parsed).forEach(([key, value]) => {
+                if (!schemaMap.has(key)) return;
+
+                try {
+                    const tStr = typeof value === 'object' ? JSON.stringify(value) : String(value); // Convert to string representation for comparison (if needed later)
+                    
+                    if (tStr !== key.toLowerCase()) throw new Error(`Type mismatch: expected "${key}", got '${value}'`);
+
+                    schemaMap.set(key, tStr);
+                } catch {
+                    return null; // Invalid type or missing data
+                }
+            });
+
+            const known
