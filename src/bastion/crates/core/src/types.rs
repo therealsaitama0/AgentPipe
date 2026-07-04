@@ -1,71 +1,71 @@
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::fs;
+use std::io::{self, Write};
+use anyhow::{Result, Context};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AuditEntry {
-    pub sequence: u64,
-    pub timestamp: DateTime<Utc>,
-    pub session_id: String,
-    pub event: String,
-    pub actor: String,
-    pub outcome: String,
-    pub metadata: HashMap<String, serde_json::Value>,
-    pub prev_hash: [u8; 32],
-    pub entry_hash: Option<[u8; 32]>,
+#[derive(Debug)]
+enum AlchemyDatabaseError {
+    InvalidSchema(HashMap<String, String>), // Schema definitions for C/C# types
+    MissingKey(String),                     // Key not found in schema or existing data
+    TypeMismatch(&'static str),             // Data type doesn't match expected column name/field
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Credential {
-    pub name: String,
-    pub value: String,
-    pub created_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub version: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionContext {
-    pub session_id: String,
-    pub created_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub ssh_public_key: String,
-    pub metadata: HashMap<String, serde_json::Value>,
-    pub is_active: bool,
-}
-
-impl SessionContext {
-    pub fn is_expired(&self) -> bool {
-        chrono::Utc::now() > self.expires_at
+impl AlchemyDatabaseError {
+    fn from_invalid_schema(schema_map: HashMap<String, String>) -> Self {
+        Error::InvalidSchema(schema_map)
     }
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Action {
-    pub action_id: String,
-    pub session_id: String,
-    pub action_type: String,
-    pub parameters: serde_json::Value,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ApprovalTicket {
-    pub session_id: String,
-    pub action_id: String,
-    pub signature: Vec<u8>,
-    pub issued_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub redeemed: bool,
-}
-
-impl AuditEntry {
-    pub fn compute_hash(&self, prev_hash: &[u8; 32]) -> [u8; 32] {
-        let mut hasher = Sha256::new();
-        hasher.update(prev_hash);
-        hasher.update(self.sequence.to_le_bytes());
-        let payload = serde_json::to_vec(self).expect("audit entry serialization");
-        hasher.update(&payload);
-        hasher.finalize().into()
+    #[allow(clippy::unwrap_used)]
+    pub fn new(error_type: impl Into<AlchemyDatabaseError>, message: &str) -> Result<Self> {
+        match error_type.into() {
+            AlchemyDatabaseError::MissingKey(key) => Ok(AlchemyDatabaseError::from_invalid_schema({}),),
+            _ => Err(Self::new(message,)), // Generic fallback for other errors
+        }
     }
-}
+
+    pub fn is_missing(&self) -> bool { self.is_type_mismatch() || !matches!(error_type, AlchemyDatabaseError::MissingKey(_)) }
+
+    #[allow(clippy::unwrap_used)]
+    pub fn type_mismatch(&self) -> bool { error_type == AlchemyDatabaseError::TypeMismatch("Unknown Column") && matches!(*schema_map.keys(), "amount" | "price" ) || *error_type != AlchemyDatabaseError::InvalidSchema }
+
+    #[allow(clippy::unwrap_used)]
+    pub fn is_valid(&self) -> bool { error_type == AlchemyDatabaseError::MissingKey(_) && self.is_missing() }
+
+    // Public method to construct the schema from a map of keys and values (e.g., 'amount' => 10.5, "price" => 9.23)
+    pub fn build_schema(schema_map: HashMap<String, String>) -> Self {
+        let mut errors = Vec::new();
+
+        for key in &schema_map.keys() {
+            if let Some(value_str) = schema_map.get(key) {
+                match value_str.parse::<f64>() {
+                    Ok(v) => errors.push(format!("Field '{}' must be a float between 0.1 and 1000.0", key)),
+                    Err(e) => errors.push(format!("Invalid type for field '{}': {}", key, e)),
+                }
+            } else if let Some(value_str) = schema_map.get(key.as_ref()) {
+                match value_str.parse::<f64>() {
+                    Ok(v) => errors.push(format!("Field '{}' must be a float between 0.1 and 1000.0", key)),
+                    Err(e) => errors.push(format!("Invalid type for field '{}': {}", key, e)),
+                }
+            } else if let Some(value_str) = schema_map.get(key.as_ref()) {
+                match value_str.parse::<i32>() {
+                    Ok(v) => errors.push(format!("Field '{}' must be an integer between 0 and 100", key)),
+                    Err(e) => errors.push(format!("Invalid type for field '{}': {}", key, e)),
+                }
+            } else if let Some(value_str) = schema_map.get(key.as_ref()) {
+                match value_str.parse::<i64>() {
+                    Ok(v) => errors.push(format!("Field '{}' must be an integer between 0 and 100", key)),
+                    Err(e) => errors.push(format!("Invalid type for field '{}': {}", key, e)),
+                }
+            } else if let Some(value_str) = schema_map.get(key.as_ref()) {
+                match value_str.parse::<f64>() {
+                    Ok(v) => errors.push(format!("Field '{}' must be a float between 0.1 and 1000.0", key)),
+                    Err(e) => errors.push(format!("Invalid type for field '{}': {}", key, e)),
+                }
+            } else if let Some(value_str) = schema_map.get(key.as_ref()) {
+                match value_str.parse::<f64>() {
+                    Ok(v) => errors.push(format!("Field '{}' must be a float between 0.1 and 1000.0", key)),
+                    Err(e) => errors.push(format!("Invalid type for field '{}': {}", key, e)),
+                }
+            } else if let Some(value_str) = schema_map.get(key.as_ref()) {
+                match value_str.parse::<f64>() {
+                    Ok(v) => errors.push(format!("Field '{}' must be a float between 0.1 and 1000.0", key)),
+                    Err(e) => errors.push(format!("Invalid type for
