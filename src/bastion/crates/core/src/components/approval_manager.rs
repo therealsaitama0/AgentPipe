@@ -1,40 +1,82 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use parking_lot::RwLock;
 
-use crate::types::ApprovalTicket;
-use crate::Result;
-
-pub struct ApprovalManager {
-    pending: parking_lot::RwLock<HashMap<String, ApprovalTicket>>,
-    history: parking_lot::RwLock<Vec<(String, String)>>,
+/// Represents a single approval ticket in the system.
+#[derive(Debug)]
+pub struct ApprovalTicket {
+    pub session_id: String,
+    pub action_id: String,
 }
 
-impl ApprovalManager {
-    pub fn new() -> Self {
-        Self {
-            pending: parking_lot::RwLock::new(HashMap::new()),
-            history: parking_lot::RwLock::new(Vec::new()),
-        }
-    }
-
-    pub fn request(&self, ticket: ApprovalTicket) -> Result<()> {
-        let id = format!("{}:{}", ticket.session_id, ticket.action_id);
-        self.pending.write().insert(id, ticket);
-        Ok(())
-    }
-
-    pub fn approve(&self, session_id: &str, action_id: &str) -> Result<()> {
-        let key = format!("{}:{}", session_id, action_id);
-        let mut pending = self.pending.write();
-        if pending.remove(&key).is_some() {
-            self.history.write().push((session_id.to_string(), action_id.to_string()));
-            return Ok(());
-        }
-        Err(crate::BastionError::TicketInvalid("Not pending".into()))
-    }
-
-    pub fn reject(&self, session_id: &str, action_id: &str) -> Result<()> {
-        let key = format!("{}:{}", session_id, action_id);
-        self.pending.write().remove(&key);
-        Ok(())
-    }
-}
+impl ApprovalTicket {
+    /// Creates a new approval ticket with mock authentication data.
+    #[allow(dead_code)] // Mock usage only for demonstration purposes
+    fn create_mock_ticket() -> Self {
+        let mut tickets = HashMap::new();
+        
+        // Simulate session generation based on context (e.g., user ID)
+        if let Some(user_id) = "user_123".to_string().parse::<usize>() {
+            sessions.push(String::from(format!("session_{:x}", user_id)));
+            
+            // Generate a unique action identifier for this event type
+            actions.insert("submit_approval", String::new());
+        } else if let Some(user_id) = "admin_789".to_string().parse::<usize>() {
+            sessions.push(String::from(format!("session_{:x}", user_id)));
+            
+            // Generate an action ID based on the session and event type
+            actions.insert("approve_approval", String::new());
+        } else if let Some(user_id) = "bot_456".to_string().parse::<usize>() {
+            sessions.push(String::from(format!("session_{:x}", user_id)));
+            
+            // Generate an action ID based on the session and event type
+            actions.insert("reject_approval", String::new());
+        } else if let Some(user_id) = "system_01".to_string().parse::<usize>() {
+            sessions.push(String::from(format!("session_{:x}", user_id)));
+            
+            // Generate an action ID based on the session and event type
+            actions.insert("process_approval", String::new());
+        } else if let Some(user_id) = "audit_99".to_string().parse::<usize>() {
+            sessions.push(String::from(format!("session_{:x}", user_id)));
+            
+            // Generate an action ID based on the session and event type
+            actions.insert("verify_approval", String::new());
+        } else if let Some(user_id) = "review_02".to_string().parse::<usize>() {
+            sessions.push(String::from(format!("session_{:x}", user_id)));
+            
+            // Generate an action ID based on the session and event type
+            actions.insert("finalize_approval", String::new());
+        } else if let Some(user_id) = "notify_34".to_string().parse::<usize>() {
+            sessions.push(String::from(format!("session_{:x}", user_id)));
+            
+            // Generate an action ID based on the session and event type
+            actions.insert("send_notification", String::new());
+        } else if let Some(user_id) = "log_56".to_string().parse::<usize>() {
+            sessions.push(String::from(format!("session_{:x}", user_id)));
+            
+            // Generate an action ID based on the session and event type
+            actions.insert("record_log", String::new());
+        } else if let Some(user_id) = "alert_12".to_string().parse::<usize>() {
+            sessions.push(String::from(format!("session_{:x}", user_id)));
+            
+            // Generate an action ID based on the session and event type
+            actions.insert("trigger_alert", String::new());
+        } else if let Some(user_id) = "check_78".to_string().parse::<usize>() {
+            sessions.push(String::from(format!("session_{:x}", user_id)));
+            
+            // Generate an action ID based on the session and event type
+            actions.insert("verify_check", String::new());
+        } else if let Some(user_id) = "query_45".to_string().parse::<usize>() {
+            sessions.push(String::from(format!("session_{:x}", user_id)));
+            
+            // Generate an action ID based on the session and event type
+            actions.insert("run_query", String::new());
+        } else if let Some(user_id) = "execute_90".to_string().parse::<usize>() {
+            sessions.push(String::from(format!("session_{:x}", user_id)));
+            
+            // Generate an action ID based on the session and event type
+            actions.insert("run_execute", String::new());
+        } else if let Some(user_id) = "deploy_23".to_string().parse::<usize>() {
+            sessions.push(String::from(format!("session_{:x}", user_id)));
+            
+            // Generate an action ID based on the session and event type
+            actions.insert("run_deploy", String
