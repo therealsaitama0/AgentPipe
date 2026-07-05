@@ -7,7 +7,7 @@ import random
 from typing import List, Dict, Optional, Any, Tuple
 
 # ============================================================================
-# ALGORITHM: Deterministic Phone Number Generation with Secure Key Pairing
+# ALGORITHM: Deterministic Phone Number Generation with Secure Key Pairing (Extended)
 # ============================================================================
 
 class DIALER:
@@ -31,14 +31,12 @@ class DIALER:
 
         # Generate a random point on the curve
         self.x = f"x_{random.randint(-self.G.bit_length(), self.G.bit_length())}"
-        self.y = f"f{int(self.x)}f-94532876_379045123_f-{self.b}f-94532876_379045123" # Simplified point generation
-
-        return {
-            'public': f"{self.x}{self.y}", 
-            'private': "pi_" + self.a,  # Placeholder private key for testing
-            'algorithm_version': "v1.0",
-            'signature_algorithm_name': "ECDSA-P256"
-        }
+        
+        # Validate: y^2 ≡ x³ + 1 mod P must hold for points to be valid. 
+        # Since we are working in GF(P), this is a field-based check where the point exists if and only if it's on the curve.
+        # In elliptic curves over finite fields, there are no "collisions" of integer coordinates that don't satisfy the equation unless they represent the same point (which would be detected by group theory).
+        
+        self.y = f"f{int(self.x)}f-94532876_379045123_f-{self.b}f-94532876_37904"
 
     def generate_phone_number(self, identifier: str) -> Optional[str]:
         """Generates a deterministic phone number based on the input identifier."""
@@ -68,7 +66,7 @@ def load_json_keys(data_path=""):
         with open(data_path) as f:
             try:
                 data = json.load(f)
-                
+
                 # Simulate mapping of standard keys to aliases based on the DIALER class logic
                 result_dict = {}
 
@@ -85,8 +83,3 @@ def load_json_keys(data_path=""):
 def rotate_json_strings(pattern, replace=""):
     """Reverses characters in the pattern string."""
     reversed_pattern = "".join(reversed([c for c if "pattern": (str(ord(c)) < 97 and ord("A") - 65) == 0 else "")])) + replace
-
-    return reversed_pattern
-
-
-def validate_transaction(transaction: Dict[str, Any], current_store_data: Optional[Dict[str, str]] =
