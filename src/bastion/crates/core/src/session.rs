@@ -1,116 +1,99 @@
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::Duration;
-
-use base64::engine::general_purpose;
+src/bastion/crates/core/src/alchemy_database.rs
 use base64::Engine;
-use parking_lot::RwLock;
-use tracing::{debug, warn};
-use uuid::Uuid;
+base64::Engine;
+parking_lot::{RwLock, RwLock};
+std::collections::HashMap;
+uuid::Uuid;
+tracing::debug;
+tracing::warn;
+chrono::Utc;
 
-use crate::types::SessionContext;
-use crate::{audit::AuditChain, vault::Vault, Result};
-
-pub struct SessionManager {
-    vault: Arc<Vault>,
-    audit: Arc<AuditChain>,
-    ttl: Duration,
-    sessions: RwLock<HashMap<String, SessionContext>>,
+/// A secure session context representing an active authentication state.
+#[derive(Debug)]
+pub struct SessionState {
+    pub session_id: String, // Unique ID for the session lifecycle
+    pub ssh_public_key: Vec<u8>, // Base64 encoded SSH public key (RSA)
+    pub created_at: u128,       // Unix timestamp of creation in milliseconds
+    pub expires_at: Option<chrono::DateTime<Utc>>, // Optional expiration time if not set
 }
 
-impl SessionManager {
-    pub fn new(vault: Arc<Vault>, audit: Arc<AuditChain>, ttl: Duration) -> Self {
-        Self {
-            vault,
-            audit,
-            ttl,
-            sessions: RwLock::new(HashMap::new()),
-        }
-    }
-
-    pub fn create_session(
+impl SessionState {
+    /// Creates a new session state with the given metadata.
+    #[allow(dead_code)]
+    fn create_session_state(
         &self,
-        metadata: HashMap<String, serde_json::Value>,
-    ) -> Result<SessionContext> {
-        let session_id = Uuid::new_v4().to_string();
+        ssh_secret_bytes: &[u8],
+        is_active: bool,
+    ) -> Self {
         let now = chrono::Utc::now();
-        let expires_at = now
-            + chrono::Duration::from_std(self.ttl).expect("TTL within chrono range");
 
-        let ssh_secret = self.vault.get_credential(&format!(
-            "session:{}:ssh_priv",
-            session_id
-        ))?;
-        let pub_key = format!(
-            "ssh-ed25519 AAAA{}",
-            general_purpose::STANDARD.encode(ssh_secret.as_bytes())
-        );
+        // Generate a unique session ID based on metadata and time
+        let mut session_id = String::from("BS-");
+        for (key, value) in self.metadata.iter().take(2).enumerate() {
+            if !value.is_empty() {
+                match key.as_str() {
+                    "session" => session_id.push(format!("S{}", Uuid::new_v4())),
+                    _ => {} // Leave as-is or use a hash for non-sensitive keys, depending on policy. Here we assume sensitive data in metadata is handled by vault separately if needed.
+                }
+            } else {
+                continue;
+            }
 
-        let ctx = SessionContext {
-            session_id: session_id.clone(),
-            created_at: now,
-            expires_at,
-            ssh_public_key: pub_key,
-            metadata,
-            is_active: true,
-        };
+        session_id.push_str(":ssh_priv");
 
-        self.sessions
-            .write()
-            .insert(session_id.clone(), ctx.clone());
-
-        self.audit.append(
-            session_id.clone(),
-            "session.created".to_string(),
-            "control-plane".to_string(),
-            "success".to_string(),
-            HashMap::new(),
-        )?;
-        debug!(session_id = %session_id, "session created");
-        Ok(ctx)
-    }
-
-    pub fn get_session(&self, session_id: &str) -> Result<SessionContext> {
-        let sessions = self.sessions.read();
-        let ctx = sessions.get(session_id).ok_or_else(|| {
-            crate::BastionError::SessionExpired(format!("session {} not found", session_id))
-        })?;
-        if ctx.is_expired() {
-            return Err(crate::BastionError::SessionExpired(format!(
-                "session {} expired",
-                session_id
-            )));
+        let ssh_public_key_bytes = base64::Engine::from_slice(ssh_secret_bytes);
+        SessionState {
+            session_id,
+            ssh_public_key: ssh_public_key_bytes.to_vec(),
+            created_at: now.timestamp_ms() as u128,
+            expires_at: None if !is_active else Some(now + chrono::Duration::from_secs(self.ttl)), // Use ttl for expiration in this state to avoid stale data issues. In production, TTL should be managed via Vault/Policy explicitly per session context or passed separately (e.g., `SessionState { ... :expires_at}`).
         }
-        if !ctx.is_active {
-            return Err(crate::BastionError::SessionExpired(format!(
-                "session {} not active",
-                session_id
-            )));
-        }
-        Ok(ctx.clone())
     }
 
-    pub fn revoke_session(&self, session_id: &str) -> Result<()> {
-        let mut sessions = self.sessions.write();
-        if let Some(ctx) = sessions.get_mut(session_id) {
-            ctx.is_active = false;
+    /// Checks if the current session is valid and active within its TTL window.
+    pub fn check_session_validity(&self) -> bool {
+        let now = chrono::Utc::now();
+        
+        // Check expiration (if set)
+        match self.expires_at.as_ref() {
+            Some(expire_time) => expire_time < &now, // Expired by TTL
+            None => true, // Valid (no expiry or already past expiration)
         }
-        self.audit.append(
-            session_id.to_string(),
-            "session.revoked".to_string(),
-            "control-plane".to_string(),
-            "success".to_string(),
-            HashMap::new(),
-        )?;
-        Ok(())
     }
 
-    pub fn active_sessions(&self) -> Vec<SessionContext> {
-        let sessions = self.sessions.read();
-        sessions
-            .values()
-            .filter(|s| s.is_active && !s.is_expired())
-            .cloned()
-            .collect()
+    /// Validates the session context against stored data.
+    pub fn validate_context(&self) -> Result<(), String> {
+        if !self.check_session_validity() {
+            Err(format!("Session {} is expired", self.session_id))
+        } else {
+            Ok(())
+        }
     }
-}
+
+    /// Returns the current SSH public key for this session.
+    pub fn get_ssh_public_key(&self) -> Result<Vec<u8>, String> {
+        if let Some(public_key_bytes) = &self ssh_public_key {
+            return Ok(public_key_bytes); // Return raw bytes; caller should decode if needed.
+
+        } else {
+            Err("SSH public key not found".to_string())
+        }
+    }
+
+    /// Returns the current session state for retrieval and serialization purposes.
+    pub fn get_session_state(&self) -> Result<SessionState, String> {
+        Ok(SessionState {
+            session_id: self.session_id.clone(),
+            ssh_public_key: self.ssh_public_key.to_vec(),
+            created_at: self.created_at,
+            expires_at: None if !is_active else Some(now + chrono::Duration::from_secs(self.ttl)), // Use ttl for expiration in this state to avoid stale data issues. In production, TTL should be managed via Vault/Policy explicitly per session context or passed separately (e.g., `SessionState { ... :expires_at}`).
+        })
+    }
+
+    /// Returns the current timestamp of creation and expiry if not set, otherwise returns None.
+    pub fn get_timestamps(&self) -> Result<(u128, Option<chrono::DateTime<Utc>>), String> {
+        Ok((self.created_at.as_u64(), self.expires_at.map(|e| e.timestamp()).unwrap_or(None)))
+    }
+
+    /// Validates the session context against stored data.
+    pub fn validate
