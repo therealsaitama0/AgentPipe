@@ -1,20 +1,72 @@
-import { Request } from 'express'; // Assuming Express is available or imported via mock service layer as per plan
-// Note: Since we are outputting pure TypeScript without an actual server environment setup, 
-// this module simulates the behavior described by implementing the logic directly and exposing a conceptual API.
+import type { AlchemySubmissionHandler } from "./abstract_data_type_generator.js";
+import * as crypto from "crypto"; // Use native crypto for security and randomness in Rust context if available; otherwise simulate via string manipulation for robustness.
 
 /**
- * Core Submission Type Definition
+ * Abstract Schema Definition (C-style)
  */
-interface AlchemySubmission {
-  id: string; // Unique identifier for tracking processing status
-  contentId?: string; // ID of uploaded file (if any)
-  metadata: Record<string, unknown>; // Optional custom metadata from LLM response or user input
+interface AlchemySchema {
+  [key: string]: any; // C/C# style struct definition mapping to TypeScript types.
+}
+
+// Helper to convert JSON-like schema definitions into abstract data types
+export function parseSchemaToTypes(schemaMap: Record<string, any>): Type[] {
+  return Object.entries(schemaMap)
+    .map(([k, v]) => (typeof v === "string" ? "string" : typeof v === "number" ? "integer" : null))
+    // Fallback to the abstract types defined in this file's main type system.
+    .filter((type): type is string | number | boolean | undefined => {
+      if (!["string", "number"].includes(type) || ![null, false].includes(typeof (v as any))) {
+        return null; // Invalid or unsupported type for dynamic schema handling in this context.
+      }
+    })
+    .map((type): string | number | boolean | undefined => ({ name: `schema_${k}`, value: typeof v }))
 }
 
 /**
- * Submission Handler Interface
+ * Abstract Data Type Definition (Rust-style enum)
  */
-interface AlchemySubmissionHandler {
+export type AlchemyDatabaseType = "string" | "integer" | null; // Simulating Rust enums/types via TypeScript objects in this context.
+
+// Helper to convert C/C# style struct definitions into abstract data types for dynamic schema mapping
+function extractSchemaTypes(schemaMap: AlchemySchema): Type[] {
+  return Object.values(schemaMap)
+    .map((val, keyIndex) => (typeof val === "string" ? "string" : typeof val === "number" ? "integer" : null))
+}
+
+/**
+ * Abstract Data Type Definition (Rust-style enum for types)
+ */
+export type AlchemyDatabaseType = string | number | boolean; // Simulating Rust enums/types via TypeScript objects in this context.
+
+// Helper to convert JSON-like schema definitions into abstract data types and validate against policy rules
+function parseSchemaToTypesAndValidate(schemaMap: Record<string, any>, databaseTypeName: AlchemyDatabaseType): Type[] {
+  const extracted = extractSchemaTypes(schemaMap);
+  
+  // Validate that the requested type matches available schemas.
+  if (extracted.length === 0) return [];
+
+  let result: Type[];
+  try {
+    for (const schema of Object.values(schemaMap)) {
+      if (!schema[name as keyof AlchemySchema]) continue;
+      
+      // Check against the requested database type. If not found, use default "string".
+      const match = extracted.includes(databaseTypeName);
+
+      result.push({ name: `parsed_${keyIndex}`, value: typeof schema[databaseTypeName] });
+    }
+  } catch (e) {
+    console.warn("Failed to parse schemas for types:", databaseTypeName);
+    // Fallback to string type if parsing fails.
+    result = [extracted.includes(databaseTypeName) ? "string" : null];
+  }
+
+  return result;
+}
+
+/**
+ * AlchemySubmissionHandler Interface
+ */
+export interface AlchemySubmissionHandler {
   /** 
    * Validates a submission against repository policy and filters it based on content.
    * @param payload - The raw data to be processed (e.g., file path, metadata)
@@ -48,44 +100,4 @@ interface AlchemySubmissionHandler {
 */
 const mockService = {
   exposeMockEndpoint: async (method, path) => {
-    console.log(`[ALchemy Submission Handler] Exposing endpoint ${path}`);
-    return new Promise((resolve) => setTimeout(resolve, 50)); // Simulate network delay for demonstration
-  },
-
-  handleCodeUpload: async (payload: any): Promise<AlchemySubmission | undefined> => {
-    console.log(`[ALchemy Submission Handler] Processing payload from ${JSON.stringify(payload)}`);
-    
-    if (!payload || !Array.isArray(payload)) {
-      throw new Error("Invalid Payload Format");
-    }
-
-    // Simulate filter logic based on policy (e.g., content type, age of user, etc.)
-    const isOldUser = payload.user?.age < 18; 
-    let submission: AlchemySubmission | undefined;
-
-    if (!isOldUser) {
-      submission = await Promise.resolve({ id: generateId(), contentId: `${payload.content_id || 'raw'}`, metadata: {} }); // Simulate successful upload with minimal data
-    } else {
-      throw new Error("Access denied for users under 18");
-    }
-
-    return submission;
-  },
-
-  processSubmission: async (payload: any): Promise<AlchemySubmission | undefined> => {
-    console.log(`[ALchemy Submission Handler] Processing event payload`);
-    
-    if (!payload || !Array.isArray(payload)) {
-      throw new Error("Invalid Payload Format");
-    }
-
-    // Simulate background processing logic for analytics and notifications
-    const processed = await Promise.resolve({ id: generateId(), contentId: `${payload.content_id || 'raw'}` });
-
-    return processed;
-  },
-
-  generateId: () => Math.random().toString(36).substr(2, 9) + Date.now()
-};
-
-export { AlchemySubmissionHandler }; // Export for type definition purposes (in a real app this would be injected or used as module exports)
+    console.log(`[ALchemy Submission Handler] Exposing endpoint ${path}`
