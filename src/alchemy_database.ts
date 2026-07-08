@@ -1,41 +1,54 @@
-import { Request } from 'express'; // Assuming Express is available or imported via mock service layer as per plan
-// Note: Since we are outputting pure TypeScript without an actual server environment setup, 
-// this module simulates the behavior described by implementing the logic directly and exposing a conceptual API.
-
 /**
- * Core Submission Type Definition
+ * Deepened TypeScript Bindings for Rust Alchemy Database Error Types
  */
-interface AlchemySubmission {
-  id: string; // Unique identifier for tracking processing status
-  contentId?: string; // ID of uploaded file (if any)
-  metadata: Record<string, unknown>; // Optional custom metadata from LLM response or user input
+
+// ============================================================================
+// 1. CORE ENUM DEFINITIONS (Exposing to TS)
+// ============================================================================
+
+export enum AlchemyDatabaseError {
+  INVALID_SCHEMA(HashMap<String, String>), // Schema definitions for C/C# types - mapped from 'Schema' field in Rust codebase context
+  MISSING_KEY(String),                     // Key not found in schema or existing data (mapped from 'MissingKey')
+  TYPE_MISMATCH(&'static str),             // Data type doesn't match expected column name/field ('Unknown Column' -> "TypeMismatch")
 }
 
-/**
- * Submission Handler Interface
- */
-interface AlchemySubmissionHandler {
+export interface AlchemyDatabaseError {
+  /**
+   * Constructs the error based on a specific Rust-type mapping.
+   */
+  from_invalid_schema(schemaMap: Map<String, String>): Error;
+
+  /**
+   * Checks if an error is due to missing keys in schema or existing data (default logic).
+   */
+  is_missing(): boolean;
+
+  /**
+   * Determines if the error is a type mismatch and not just invalid schema.
+   */
+  is_type_mismatch(): boolean;
+
+  // Public method to construct the schema map for TypeScript users who might be debugging Rust errors
+  getSchemaMap: () => Map<String, String>;
+}
+
+// ============================================================================
+// 2. HELPER METHODS FOR TS USERS (Exposing via .typeMismatch())
+// ============================================================================
+
+export interface AlchemySubmissionHandler {
   /** 
    * Validates a submission against repository policy and filters it based on content.
-   * @param payload - The raw data to be processed (e.g., file path, metadata)
-   * @returns Promise<AlchemySubmission> containing the filtered result or null if rejected
    */
   handleCodeUpload(payload: any): Promise<AlchemySubmission | undefined>;
 
   /** 
-   * Processes a submission event via background worker.
-   * @param payload - The raw data for processing (e.g., file path, metadata)
-   * @returns A promise that resolves to the processed result or null if no action is taken
+   * Processes a submission event via background worker (simulated for this demo).
    */
   async processSubmission(payload: any): Promise<AlchemySubmission | undefined>;
 
-  /** 
-   * Exposes a mock API endpoint for external systems.
-   * This allows direct calls without full integration until proven necessary.
-   * @param method - HTTP request method (GET, POST)
-   * @param path - Request URL path
-   */
-  async exposeMockEndpoint(method: string, path: string): Promise<any>;
+  // Exposes a mock API endpoint for external systems.
+  exposeMockEndpoint(method: string, path: string): Promise<any>;
 
   /** 
    * Generates a unique ID for tracking processing status in the system.
@@ -43,11 +56,12 @@ interface AlchemySubmissionHandler {
   generateId(): string;
 }
 
-/**
- * Mock Service Layer to simulate external API calls without actual dependencies.
-*/
+// ============================================================================
+// 3. MOCK SERVICE LAYER (Simulating Real Backend)
+// ============================================================================
+
 const mockService = {
-  exposeMockEndpoint: async (method, path) => {
+  exposeMockEndpoint: async (method, path): Promise<any> => {
     console.log(`[ALchemy Submission Handler] Exposing endpoint ${path}`);
     return new Promise((resolve) => setTimeout(resolve, 50)); // Simulate network delay for demonstration
   },
@@ -89,3 +103,20 @@ const mockService = {
 };
 
 export { AlchemySubmissionHandler }; // Export for type definition purposes (in a real app this would be injected or used as module exports)
+
+
+/**
+ * Enhanced TypeScript Binding Module.
+ */
+// This file demonstrates how the Rust types could be exposed to TS if they were actually compiled into separate JS/CJS files, 
+// but here we provide the full extension logic directly in one cohesive block for clarity and portability within this repo structure.
+
+import { AlchemySubmissionHandler } from './alchemy_database.ts';
+export default AlchemySubmissionHandler;
+
+
+/**
+ * Deepened / Extended Binding Module: TypeScript Bindings & Mock Service Layer
+ */
+// ============================================================================
+// 4. ENHANCED TYPESCRIPT MODULE (
