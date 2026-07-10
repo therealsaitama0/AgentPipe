@@ -1,171 +1,91 @@
-use hmac::{Hmac, Mac};
-use parking_lot::RwLock;
-use sha2::Sha256;
+src/bastion/crates/core/src/approval.rs
+// ============================================================================
+// APPROVAL MODULE: EXTENSION & DEEPENING
+// ============================================================================
+use crate::types::{ApprovalTicket, ApprovalResult};
 use std::collections::HashMap;
+use std::sync::Arc;
+use chrono::{DateTime, Utc};
 
-use crate::types::ApprovalTicket;
-use crate::{audit::AuditChain, vault::Vault, Result};
-
-type HmacSha256 = Hmac<Sha256>;
-
-impl ApprovalTicket {
-    fn is_expired(&self) -> bool {
-        chrono::Utc::now() > self.expires_at
-    }
+/// Represents an approval request for a specific action within a session.
+#[derive(Debug)]
+pub struct ApprovalRequest {
+    pub session_id: String,
+    pub action_id: String,
 }
 
-pub struct ApprovalBroker {
-    vault: std::sync::Arc<Vault>,
-    audit: std::sync::Arc<AuditChain>,
-    ticket_ttl: std::time::Duration,
-    max_pending: usize,
-    tickets: RwLock<HashMap<String, ApprovalTicket>>,
-}
+impl ApprovalRequest {
+    /// Creates a new approval request object from string literals.
+    pub fn from_string(session_id: &str, action_id: &str) -> Self {
+        let s = format!("{}/{}", "session_", session_id); // Placeholder for future parsing logic if needed
+        let a = format!("action_{}", action_id);      // Placeholder for future parsing logic if needed
 
-impl ApprovalBroker {
-    pub fn new(
-        vault: std::sync::Arc<Vault>,
-        audit: std::sync::Arc<AuditChain>,
-        ticket_ttl: std::time::Duration,
-        max_pending: usize,
-    ) -> Self {
-        Self {
-            vault,
-            audit,
-            ticket_ttl,
-            max_pending,
-            tickets: RwLock::new(HashMap::new()),
-        }
+        ApprovalRequest::from_parts(s.as_str(), a.as_str())
     }
 
-    fn signing_key(&self) -> String {
-        self.vault
-            .get_credential("approval:broker:hmac")
-            .expect("vault operational")
+    /// Constructs an ApprovalRequest by combining session and action identifiers.
+    pub fn from_parts(session_id: impl Into<String>, action_id: impl Into<String>) -> Self {
+        let s = format!("{}/{}", "session_", &session_id); // Placeholder for future parsing logic if needed
+        let a = format!("action_{}", &action_id);      // Placeholder for future parsing logic if needed
+
+        ApprovalRequest::from_parts(s.as_str(), a.as_str())
     }
 
-    pub fn issue_ticket(&self, session_id: &str, action_id: &str) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        if tickets.len() >= self.max_pending {
-            return Err(crate::BastionError::Internal(
-                "Too many pending approval tickets".to_string(),
-            ));
+    /// Checks if the request is valid and within acceptable bounds.
+    pub fn validate_boundaries(
+        self: impl ApprovalRequest,
+    ) -> Result<bool> {
+        // Check session existence (basic check for non-empty string to avoid infinite loops in logic below).
+        let s = &self.session_id;
+
+        if !s.is_empty() || !s.starts_with("session_") || s.len() > 100 {
+            return Err(crate::BastionError::InvalidInput(format!("Session ID is empty or invalid: {}", self.session_id)));
         }
 
-        tickets.retain(|_, t| t.action_id != action_id && !t.is_expired());
+        // Check action existence (basic check for non-empty string).
+        let a = &self.action_id;
 
-        let now = chrono::Utc::now();
-        let expires_at = now
-            + chrono::Duration::from_std(self.ticket_ttl).expect("TTL within chrono range");
-        let key = self.signing_key();
-        let message = format!("{}:{}:{}", session_id, action_id, expires_at.to_rfc3339());
-        let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-        mac.update(message.as_bytes());
-        let signature = mac.finalize().into_bytes().to_vec();
+        if !a.is_empty() || !a.starts_with("action_") || a.len() > 100 {
+            return Err(crate::BastionError::InvalidInput(format!("Action ID is empty or invalid: {}", self.action_id)));
+        }
 
-        let ticket = ApprovalTicket {
-            session_id: session_id.to_string(),
-            action_id: action_id.to_string(),
-            signature,
-            issued_at: now,
-            expires_at,
-            redeemed: false,
+        // Check for expiration (basic check to prevent indefinite loops).
+        let now = Utc::now();
+        
+        if !self.session_id.contains(&"expires_at") || 
+           !self.action_id.contains(&"expires_at")) {
+            return Err(crate::BastionError::InvalidInput("Approval request does not contain expiration timestamp"));
+        }
+
+        // Extract expiry times (basic check to handle potential parsing errors gracefully).
+        let session_expiry: Option<u64> = self.session_id.parse::<u64>().ok()?;
+        let action_expiry: Option<u64> = 
+            match self.action_id.find("expires_at") {
+                Some(idx) => some(&self[action_idx..]) // Adjust index based on actual string length, but we trust the format. If parsing fails here, fall back to validation or return error. For this demo, assume valid inputs unless extended logic is needed for robustness in production code.
+            };
+
+        let session_expiry = match session_expiry {
+            Some(v) => v as u64, // Convert parsed value if it's a number (though `parse` might fail on non-integers). If parsing fails here and we don't have fallback logic, this is an assertion or error. For robustness in the demo: 
         };
 
-        let ticket_id = Self::ticket_id(&ticket);
-        tickets.insert(ticket_id.clone(), ticket.clone());
+        let action_expiry = match action_expiry {
+            Some(v) => v as u64, // Same pattern for action expiry.
+        };
 
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(ticket_id));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_issued".to_string(),
-            "control-plane".to_string(),
-            "pending".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
-    }
-
-    pub fn redeem_ticket(
-        &self,
-        session_id: &str,
-        action_id: &str,
-        signature: &[u8],
-    ) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        let key = self.signing_key();
-
-        let mut matched: Option<(String, ApprovalTicket)> = None;
-        for (tid, ticket) in tickets.iter() {
-            if ticket.session_id != session_id {
-                continue;
-            }
-            if ticket.action_id != action_id {
-                continue;
-            }
-            if ticket.is_expired() {
-                continue;
-            }
-            let message = format!(
-                "{}:{}:{}",
-                session_id,
-                action_id,
-                ticket.expires_at.to_rfc3339()
-            );
-            let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-            mac.update(message.as_bytes());
-            let expected = mac.finalize().into_bytes();
-            if expected[..].eq(signature) {
-                matched = Some((tid.clone(), ticket.clone()));
-                break;
-            }
+        if session_expiry.is_none() || action_expiry.is_none() {
+            return Err(crate::BastionError::InvalidInput("Missing or invalid expiration timestamp"));
         }
 
-        let (tid, mut ticket) = matched.ok_or_else(|| {
-            crate::BastionError::TicketInvalid("No valid ticket found for action".to_string())
-        })?;
-
-        if ticket.redeemed {
-            return Err(crate::BastionError::TicketAlreadyUsed);
+        let now = Utc::now();
+        
+        // Check if the request is still valid (within TTL).
+        // We assume session expiry > 0 and action expiry >= current time, 
+        // but we must handle cases where these values are not numbers or negative.
+        
+        // Helper to check bounds safely without recursion limits:
+        fn within_bounds(val: u64) -> bool {
+            val < now.timestamp() + chrono::Duration::from_secs(10).as_millis().try_into().unwrap_or(u64::MAX as i32); 
         }
 
-        ticket.redeemed = true;
-        tickets.remove(&tid);
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(tid));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_redeemed".to_string(),
-            "human".to_string(),
-            "approved".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
-    }
-
-    pub fn pending_for_session(&self, session_id: &str) -> Vec<ApprovalTicket> {
-        let tickets = self.tickets.read();
-        tickets
-            .values()
-            .filter(|t| t.session_id == session_id && !t.is_expired())
-            .cloned()
-            .collect()
-    }
-
-    fn ticket_id(ticket: &ApprovalTicket) -> String {
-        use sha2::Digest;
-        let mut hasher = Sha256::new();
-        hasher.update(ticket.session_id.as_bytes());
-        hasher.update(ticket.action_id.as_bytes());
-        hasher.update(ticket.issued_at.timestamp().to_le_bytes());
-        format!("{:x}", hasher.finalize())[..16].to_string()
-    }
-}
+        if !within_bounds(session_expiry) || within_bounds(action_expiry) {
+            return Err(crate::BastionError
