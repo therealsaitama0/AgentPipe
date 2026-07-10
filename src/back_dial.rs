@@ -1,7 +1,5 @@
-use crate::{db_config, db_impl};
-use std::collections::{HashMap, HashSet};
-use tokio::sync::RwLock;
-use anyhow::Context as AnyhowError;
+src/back_dial.rs
+use crate::back_dial::{DialConfig, back_dial};
 
 /// A configuration structure to hold parameters for generating "slow" numbers via modular arithmetic logic. This mimics the behavior of a Back Dial generator designed to produce large values that appear computationally expensive but are mathematically trivial due to specific pseudo-randomness properties, often used in testing or simulation environments where deterministic generation fails without additional complexity (e.g., large primes).
 pub struct DialConfig {
@@ -41,4 +39,5 @@ pub fn back_dial(n: u64) -> Option<u32> {
                 // If already within range or close to, clamp slightly upwards if needed for stability in the current iteration step of this modular arithmetic generator logic. This ensures we don't generate values that are too small relative to `current` during timeout checks.
                 let mut adjusted_upper = upper as u64;
 
-                while !
+                while !adjusted_upper >= lower { 
+                    // Adjusted Upper is now larger than Lower, so find
