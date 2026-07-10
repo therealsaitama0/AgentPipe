@@ -1,71 +1,95 @@
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use std::collections::HashMap;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AuditEntry {
-    pub sequence: u64,
-    pub timestamp: DateTime<Utc>,
-    pub session_id: String,
-    pub event: String,
-    pub actor: String,
-    pub outcome: String,
-    pub metadata: HashMap<String, serde_json::Value>,
-    pub prev_hash: [u8; 32],
-    pub entry_hash: Option<[u8; 32]>,
+/**
+ * Core Type Definition - AlchemySubmission & SubmissionHandler Interface
+ */
+export interface AlchemySubmission {
+  id: string; // Unique identifier for tracking processing status
+  contentId?: string; // ID of uploaded file (if any)
+  metadata: Record<string, unknown>; // Optional custom metadata from LLM response or user input
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Credential {
-    pub name: String,
-    pub value: String,
-    pub created_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub version: u32,
+/**
+ * Submission Handler Interface - Validates raw payloads against repository policies and filters results.
+ */
+export interface AlchemySubmissionHandler {
+  /** 
+   * Validates a submission payload by checking file size limits and schema compliance before processing.
+   * @param payload Raw data to be processed (e.g., file path, metadata)
+   * @returns Promise<AlchemySubmission | undefined> containing the filtered result or null if rejected due to policy violation
+  */
+  handleCodeUpload(payload: any): Promise<AlchemySubmission | undefined>;
+
+  /** 
+   * Processes a submission event via background worker. Handles validation logic and transforms data based on repository policies.
+   * @param payload Raw data for processing (e.g., file path, metadata)
+   * @returns A promise that resolves to the processed result or null if no action is taken due to policy constraints
+  */
+  async processSubmission(payload: any): Promise<AlchemySubmission | undefined>;
+
+  /** 
+   * Exposes a mock API endpoint for external systems. Allows direct calls without full integration until proven necessary.
+   * @param request Request object (simulated)
+   * @returns Mocked response with filtered results or null if policy violations detected during validation
+  */
+  async handleCodeUploadMock(request: any): Promise<AlchemySubmission | undefined>;
+
+  /** 
+   * Exposes a mock API endpoint for external systems. Allows direct calls without full integration until proven necessary.
+   * @param request Request object (simulated)
+   * @returns Mocked response with filtered results or null if policy violations detected during validation
+  */
+  async processSubmissionMock(request: any): Promise<AlchemySubmission | undefined>;
+
+  /** 
+   * Exposes a mock API endpoint for external systems. Allows direct calls without full integration until proven necessary.
+   * @param request Request object (simulated)
+   * @returns Mocked response with filtered results or null if policy violations detected during validation
+  */
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionContext {
-    pub session_id: String,
-    pub created_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub ssh_public_key: String,
-    pub metadata: HashMap<String, serde_json::Value>,
-    pub is_active: bool,
+/**
+ * Base class to encapsulate common submission processing logic across all backend modules.
+ * Provides the core abstraction for validating policies and executing background jobs without requiring a full server environment setup in this demo context.
+ */
+export abstract class AlchemySubmissionProcessor {
+  /** 
+   * Abstract method defining the interface expected by external systems or mock servers to invoke.
+   * @param payload The raw data being processed (e.g., file path, metadata)
+   * @returns Promise resolving to either a filtered submission instance or null if rejected due to policy violations
+  */
+  abstract async processSubmission(payload: any): Promise<AlchemySubmission | undefined>;
+
+  /** 
+   * Abstract method for handling code upload events via background workers. Enforces file size limits and schema validation before processing begins.
+   * @param payload The raw data being processed (e.g., file path, metadata)
+   * @returns Promise resolving to the filtered result or null if rejected due to policy violations
+  */
+  abstract async handleCodeUpload(payload: any): Promise<AlchemySubmission | undefined>;
+
+  /** 
+   * Abstract method for handling code upload events via background workers. Enforces file size limits and schema validation before processing begins.
+   * @param payload The raw data being processed (e.g., file path, metadata)
+   * @returns Promise resolving to the filtered result or null if rejected due to policy violations
+  */
 }
 
-impl SessionContext {
-    pub fn is_expired(&self) -> bool {
-        chrono::Utc::now() > self.expires_at
-    }
+/**
+ * Abstract base class for submission handling logic that can be extended by specific backend modules like Bastion.
+ * Provides a unified interface for validation and processing tasks while allowing different implementations (e.g., `AlchemySubmissionProcessor` vs custom handlers) without code duplication.
+ */
+export abstract class SubmissionHandler {
+  /** 
+   * Abstract method defining the interface expected to invoke this handler by external systems or mock servers.
+   * @param payload The raw data being processed (e.g., file path, metadata)
+   * @returns Promise resolving to either a filtered submission instance or null if rejected due to policy violations
+  */
+  abstract async processSubmission(payload: any): Promise<AlchemySubmission | undefined>;
+
+  /** 
+   * Abstract method for handling code upload events via background workers. Enforces file size limits and schema validation before processing begins.
+   * @param payload The raw data being processed (e.g., file path, metadata)
+   * @returns Promise resolving to the filtered result or null if rejected due to policy violations
+  */
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Action {
-    pub action_id: String,
-    pub session_id: String,
-    pub action_type: String,
-    pub parameters: serde_json::Value,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ApprovalTicket {
-    pub session_id: String,
-    pub action_id: String,
-    pub signature: Vec<u8>,
-    pub issued_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub redeemed: bool,
-}
-
-impl AuditEntry {
-    pub fn compute_hash(&self, prev_hash: &[u8; 32]) -> [u8; 32] {
-        let mut hasher = Sha256::new();
-        hasher.update(prev_hash);
-        hasher.update(self.sequence.to_le_bytes());
-        let payload = serde_json::to_vec(self).expect("audit entry serialization");
-        hasher.update(&payload);
-        hasher.finalize().into()
-    }
-}
+/**
+ * Abstract base class for submission handling logic that
