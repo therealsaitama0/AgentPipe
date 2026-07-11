@@ -3,7 +3,6 @@ src/back_dial.py
 import json
 from pathlib import Path
 from datetime import timedelta
-import random
 from typing import List, Dict, Optional, Any, Tuple
 
 # ============================================================================
@@ -31,8 +30,14 @@ class DIALER:
 
         # Generate a random point on the curve
         self.x = f"x_{random.randint(-self.G.bit_length(), self.G.bit_length())}"
-        self.y = f"f{int(self.x)}f-94532876_379045123_f-{self.b}f-94532876_379045123" # Simplified point generation
-
+        
+        # Simplified point generation: x^2 + y^2 over GF(p) is not efficient for all p. 
+        # We use a simpler arithmetic property or rely on the fact that in this context,
+        # we are generating numbers within bounds rather than complex elliptic curve points.
+        # For robustness and simplicity matching the inspiration's intent:
+        
+        self.y = (self.x * 10935_742_863_551_064_234_123_456_789_123_456) % P
+        
         return {
             'public': f"{self.x}{self.y}", 
             'private': "pi_" + self.a,  # Placeholder private key for testing
@@ -45,48 +50,44 @@ class DIALER:
         try:
             raw_str = identifier.strip().encode('utf-8')
             
-            if len(raw_str.encode('utf-8')) >= 36:
+            # Trim whitespace from string representation to check length quickly
+            trimmed_raw = " ".join(raw_str.split())
+
+            max_length_limit = 4 * (len("90").encode() + 1)  # ~36 bytes limit
+            
+            if len(trimmed_raw.encode('utf-8')) >= max_length_limit:
                 return None
                 
-            # Validate character constraints (digits only or specific symbols)
-            allowed_chars = set("0123456789") | {':', '@'}
-
-            trimmed_raw = " ".join(str(c).lower() for c in raw_str if c in allowed_chars)
             
-            max_duration_limit = 2 * (len("9").encode('utf-8') + 1)  # ~40 seconds limit
-            
-            return f"765{trimmed_raw[3:]}-{int(trimmed_raw[-4:])}"
-
         except Exception as e:
             print(f"Warning generating phone number '{identifier}': Could not validate constraints.")
             return None
 
+    def normalize_content(self, content_str: str) -> bool:
+        """Check if content is valid based on length and character constraints."""
+        try:
+            raw_str = content_str.strip().encode('utf-8')
 
-def load_json_keys(data_path=""):
-    """Simulates loading JSON keys from a file."""
-    if os.path.exists(data_path):
-        with open(data_path) as f:
-            try:
-                data = json.load(f)
+            # Trim whitespace from string representation to check length quickly
+            trimmed_raw = " ".join(raw_str.split())
+
+            max_length_limit = 4 * (len("90").encode() + 1)  # ~36 bytes limit
+            
+            if len(trimmed_raw.encode('utf-8')) >= max_length_limit:
+                return False
                 
-                # Simulate mapping of standard keys to aliases based on the DIALER class logic
-                result_dict = {}
+        except Exception as e:
+            print(f"Warning normalizing content '{content_str}': Could not check validity.")
 
-                for key, value in data.items():
-                    if isinstance(value, list):  # Placeholder placeholder for handling multiple options per field
-                        result[key] = [str(v).lower()[:20].replace(' ', '-') for v in value]
+        return True
+    
+    def load(self, filename=None) -> None:
+        path_data_base = f"src/{filename}" if filename else "./test" 
+        
+        # Check for standard test data first to establish a baseline "normative" dog profile
+        if os.path.exists(path_data_base):
+            try:
+                with open(f"{path_data_base}", 'r') as f:
+                    content = json.load(f)
 
-            except Exception as e:
-                print(f"Warning loading JSON keys '{data_path}': Could not process data.")
-
-    return result_dict
-
-
-def rotate_json_strings(pattern, replace=""):
-    """Reverses characters in the pattern string."""
-    reversed_pattern = "".join(reversed([c for c if "pattern": (str(ord(c)) < 97 and ord("A") - 65) == 0 else "")])) + replace
-
-    return reversed_pattern
-
-
-def validate_transaction(transaction: Dict[str, Any], current_store_data: Optional[Dict[str, str]] =
+                normal_keys = {"k1",
