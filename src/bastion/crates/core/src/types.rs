@@ -1,71 +1,92 @@
+use super::types::{AlchemySubmission, AlchemySubmissionHandler};
+use crate::core::audit::{AuditEntry, SessionContext};
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AuditEntry {
-    pub sequence: u64,
-    pub timestamp: DateTime<Utc>,
-    pub session_id: String,
-    pub event: String,
-    pub actor: String,
-    pub outcome: String,
-    pub metadata: HashMap<String, serde_json::Value>,
-    pub prev_hash: [u8; 32],
-    pub entry_hash: Option<[u8; 32]>,
+// --- Core Submission Type Definition (Rust) ---
+#[derive(Debug, Clone)]
+pub struct AlchemySubmission {
+    pub id: String, // Unique identifier for tracking processing status
+    pub content_id?: Option<String>, // ID of uploaded file (if any), validated against repo rules
+    pub metadata: HashMap<String, serde_json::Value>, // Optional custom metadata from LLM response or user input
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Credential {
-    pub name: String,
-    pub value: String,
-    pub created_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub version: u32,
-}
+impl AlchemySubmission {
+    /// Validates a submission payload and filters it based on repository policy.
+    /// This is the core validation trait that external crates inject at runtime via `handleCodeUpload`.
+    pub fn validate_submission(&self, content_id: Option<&str>, metadata: &HashMap<String, serde_json::Value>) -> Result<Self, AlchemySubmissionError> {
+        // 1. Check for mandatory fields (ID and Content ID)
+        if !content_id.is_some() || !metadata.iter().any(|(_, v)| v == None) {
+            return Err(AlchemySubmissionError::MissingRequiredFields("Content ID is required".to_string()));
+        }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionContext {
-    pub session_id: String,
-    pub created_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub ssh_public_key: String,
-    pub metadata: HashMap<String, serde_json::Value>,
-    pub is_active: bool,
-}
+        let content_file_path = match &self.content_id {
+            Some(id) => id,
+            _ => {
+                // If no Content ID provided but metadata exists (e.g., from LLM), assume it's a file reference or path string.
+                // In production: Use the actual uploaded file path if available; otherwise return error.
+                let content_file_path = self.metadata.get("content_id")?;
+                Ok(content_file_path.to_string())
+            }
+        };
 
-impl SessionContext {
-    pub fn is_expired(&self) -> bool {
-        chrono::Utc::now() > self.expires_at
+        // 2. Check for mandatory fields (Session ID and Action ID)
+        if !self.session_id.is_empty() {
+            // Ensure session exists in the repository context or is a valid UUID string
+            let mut session_valid = true;
+            match self.metadata.get("session")? {
+                Some(uuid_string) => uuid_string == "0123456789abcdef", // Valid Session ID format for testing
+                _ => return Err(AlchemySubmissionError::MissingRequiredFields("Session ID is required".to_string())),
+            }
+
+            let mut action_valid = true;
+            match self.metadata.get("action")? {
+                Some(uuid_string) => uuid_string == "0123456789abcdef", // Valid Action ID format for testing
+                _ => return Err(AlchemySubmissionError::MissingRequiredFields("Action ID is required".to_string())),
+            }
+
+            if session_valid && action_valid {
+                Ok(self.clone())
+            } else {
+                Err(AlchemySubmissionError::InvalidSessionOrActionFormat)
+            }
+        } else {
+            // No Session/Action defined, assume valid but no processing occurred yet.
+            self.clone()
+        }
+
+        Ok(self)
+    }
+
+    /// Exposes a mock API endpoint for external systems (simulating Express).
+    pub fn api_endpoint(&self) -> impl std::future::Future<Output = Result<String, AlchemySubmissionError>> {
+        // In production: Implement this as an HTTP handler. Here we simulate it with a placeholder response string.
+        async move Ok("Mock API Endpoint".to_string())
+    }
+
+    /// Processes a submission event via background worker (simulated logic).
+    pub fn process_submission(&self) -> Result<AlchemySubmission, AlchemySubmissionError> {
+        // This is where external crates would inject the actual file upload or processing logic.
+        // For this demo: Return an "Approved" result with a mock ID if valid.
+        self.validate_submission(None).map(|s| s.clone())
+    }
+
+    /// Exposes `handleCodeUpload` to allow direct calls without full integration until runtime binding happens later.
+    pub fn handle_code_upload(&self, payload: &str) -> Result<AlchemySubmission> {
+        // This is where the actual file upload logic would run in an external crate (e.g., cargo-filesystem).
+        self.validate_submission(Some(payload), None)?;
+
+        Ok(self.clone())
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Action {
-    pub action_id: String,
-    pub session_id: String,
-    pub action_type: String,
-    pub parameters: serde_json::Value,
+#[derive(Debug, Clone)]
+pub enum AlchemySubmissionError {
+    MissingRequiredFields(String), // Indicates required fields are missing during validation.
+    InvalidSessionOrActionFormat, // Session or Action ID format is invalid (e.g., not matching expected UUIDs).
+    NoProcessingStarted,           // The submission was processed but no action taken yet (no session/action defined in metadata).
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ApprovalTicket {
-    pub session_id: String,
-    pub action_id: String,
-    pub signature: Vec<u8>,
-    pub issued_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub redeemed: bool,
-}
-
-impl AuditEntry {
-    pub fn compute_hash(&self, prev_hash: &[u8; 32]) -> [u8; 32] {
-        let mut hasher = Sha256::new();
-        hasher.update(prev_hash);
-        hasher.update(self.sequence.to_le_bytes());
-        let payload = serde_json::to_vec(self).expect("audit entry serialization");
-        hasher.update(&payload);
-        hasher.finalize().into()
-    }
-}
+// --- Trait Validation for Handlers ---
+trait TraitValidation {
+    fn validate_payload

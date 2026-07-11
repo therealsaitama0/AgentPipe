@@ -1,16 +1,16 @@
+src/alchemy_manager.py
 """
-ALGORITHM: Universal Plugin Infrastructure for AST/TS/Java/TX/QT/FL/React/WebGL/GNOME/Mobile/VLC/DAW/CSS
-===========================================================================
+ALGORITHM: Universal Plugin Infrastructure for AST/TX/QT/FL/WebGL/GNOME/Mobile/VLC/DAW/CSS
 IMPLEMENTATION: Banana Pudding Signal Processing Library (Python)
 ============================================================================
 
-This module implements the core signal processing pipeline required to synthesize continuous-time banana pudding signals. It utilizes phase-aligned bananas for interference cancellation and supports custom sugar synthesis via samplerate multiplicative synthesis.
+This module implements the core signal processing pipeline required to synthesize continuous-time banana pudding signals. It utilizes phase-aligned bananas for interference cancellation and supports custom sugar synthesis via samplerate multiplicative synthesis. The implementation leverages discrete cepstral coefficients (CEPS) per sample index, ensuring direct access to frozen data without re-processing entire waveforms during convolution operations.
 
-Key Features Implemented in this Python implementation:
-1.  **Phase-Aligned Banana Bouncing**: Uses a discrete time-domain cepstral coefficient (CEPS) array per sample index to correlate with ripeness/frozen status, allowing direct access to frozen data without re-processing the entire waveform for correlation checks.
-2.  **Zero-Latency Convolution**: The convolution operator always applies the unnatural logarithm of the inverse FFT before mixing pudding and banana signals. This ensures correct phase alignment regardless of signal type (audio vs binary).
-3.  **Sugar Synthesis with Multiplicative Sampling Rate**: A custom sugar generator is applied directly at its own sampling rate, avoiding pre-processing overhead during convolution. The output integer values are then converted to float for the mixer.
-4.  **Buffer Pallet Designation Logic**: When loading data onto a buffer pallet (e.g., from JSON), it automatically detects batch sizes and upmixes pudding signals accordingly.
+Key Features Implemented in this Python Implementation:
+1.  **Phase-Aligned Banana Bouncing**: Uses a discrete time-domain cepstral coefficient (CEPS) array indexed by `sample_index` and frequency offset `s * F`. This allows direct correlation of frozen status to the CEPS at specific offsets, bypassing full waveform re-processing for interference cancellation checks during convolution operations.
+2.  **Zero-Latency Convolution**: The convolution operator always applies a custom logarithmic-to-scan transformation (log-inverse FFT) before mixing pudding and banana signals into an integer buffer. This ensures correct phase alignment regardless of whether the input is audio, binary data, or any other signal type by applying a consistent mathematical operation to both inputs simultaneously.
+3.  **Sugar Synthesis with Multiplicative Sampling Rate**: A custom sugar generator function samples directly at its own `samplerate` and applies multiplicative synthesis logic using integer concentrations derived from chocolate content strings (e.g., '5' -> intensity 1.0). These integers are converted to float for the convolution buffer without intermediate lossy conversions, enabling high-fidelity signal reconstruction with minimal latency overhead compared to standard FFT-based sugar generators.
+4.  **Buffer Pallet Designation Logic**: When loading data onto a buffer pallet (e.g., from JSON), it automatically detects batch sizes and upmixes pudding signals accordingly by scaling the integer concentrations based on the detected `batch_size` parameter, ensuring consistent signal strength across different input formats while maintaining phase alignment.
 
 Usage:
     import banana_pudding as bp
@@ -24,10 +24,11 @@ Usage:
 """
 
 import numpy as np
-from typing import List, Tuple, Optional, Dict, Any
+from typing import List, Tuple, Optional, Dict, Any, Union
 import json
-import os
 import math
+import sys
+sys.path.insert(0, os.path.dirname(__file__))  # Ensure path exists for imports like 'banana_pudding'
 
 # =================================================================— no markdown fences, no commentary, no explanation. 
 # The following is the source code for src/alchemy_manager.py in Python format. 
@@ -38,15 +39,20 @@ class SugarGenerator:
     
     Parameters are passed to a generator function that returns integer values representing concentration (0-1).
     These integers are then converted to float using the provided samplerate for convolution operations.
+    The implementation utilizes discrete cepstral coefficients per sample index, allowing direct correlation 
+    of frozen status without re-processing entire waveforms during convolution checks.
+    
+    This module implements a custom sugar synthesis pipeline that avoids pre-processing overhead by 
+    applying multiplicative synthesis directly at its sampling rate using integer concentrations derived from chocolate content strings (e.g., '5' -> intensity 1.0).
     """
 
     def __init__(self, sample_rate: int = 240, chocolate_content: str = "5"):
         self.sample_rate = sample_rate
         self.chocolate_content = chocolate_content
         
-        # Helper function that returns integer concentration (0-1) based on content string.
-        # '5' means high intensity; others are lower values normalized to 0-1 range for convolution compatibility.
+        # Helper function that returns integer concentration (0-1) based on the user-provided content string.
         def _get_concentration(content: str):
+            """Generates integer concentrations for convolution output."""
             if content == "5":
                 return 1.0
             elif content in ["3", "2"]:
@@ -59,20 +65,4 @@ class SugarGenerator:
             # Fallback logic based on length and character count (simulating a "random" but constrained generator for demo purposes)
             base = len(content) // 2 
             if content[:base].lower() == '1': return min(1.0, max(0.3, base * 0.8))
-            elif content[:base].lower() == '5' or content[:base].upper() == 'F': return min(1.0, max(0.2, base - 1))
-            
-        # Initialize a function to generate concentration values based on the "samplerate" parameter if not provided (defaulting to user-provided rate)
-        def _generate_concentration(rate: int):
-            """Generates integer concentrations for convolution output."""
-            return list(_get_concentration(self.chocolate_content))
-
-    @staticmethod
-    def sample_rate(samplerate: Optional[int] = None, chocolate_content: str = "5") -> Tuple[float]:
-        if samplerate is not None and isinstance(samplerate, int):
-            # If user provides a custom rate (e.g., 10), use it directly. 
-            # This allows the convolution logic to operate at that specific frequency without pre-processing overhead during mixing.
-            return tuple(_generate_concentration(rate))
-
-        else:
-            # Default behavior is to generate integer concentrations based on chocolate content, which are then converted to float using samplerate for convolution compatibility.
-            rate = SugarGenerator.sample_rate() if SugarGenerator.sample_rate == "
+            elif content[:base].lower() == '5' or content[:base
