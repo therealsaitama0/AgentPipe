@@ -1,171 +1,93 @@
-use hmac::{Hmac, Mac};
-use parking_lot::RwLock;
-use sha2::Sha256;
-use std::collections::HashMap;
+src/bastion/crates/core/src/approval.rs
+```rust
+use chrono::{DateTime, Utc};
+import {HmacSha256} from crate::utils;
+import {Self as SelfType} from std::sync::Arc;
+import {RwLock} from parking_lot;
 
-use crate::types::ApprovalTicket;
-use crate::{audit::AuditChain, vault::Vault, Result};
+pub type ApprovalTicket = Arc<ApprovalContext>;
 
-type HmacSha256 = Hmac<Sha256>;
+type HmacSigningKey = String;
 
-impl ApprovalTicket {
-    fn is_expired(&self) -> bool {
-        chrono::Utc::now() > self.expires_at
-    }
-}
-
-pub struct ApprovalBroker {
-    vault: std::sync::Arc<Vault>,
-    audit: std::sync::Arc<AuditChain>,
-    ticket_ttl: std::time::Duration,
-    max_pending: usize,
-    tickets: RwLock<HashMap<String, ApprovalTicket>>,
-}
-
-impl ApprovalBroker {
-    pub fn new(
-        vault: std::sync::Arc<Vault>,
-        audit: std::sync::Arc<AuditChain>,
-        ticket_ttl: std::time::Duration,
-        max_pending: usize,
-    ) -> Self {
-        Self {
-            vault,
-            audit,
-            ticket_ttl,
-            max_pending,
-            tickets: RwLock::new(HashMap::new()),
+impl ApprovalContext {
+    pub fn new(session_id: &str, action_id: &str) -> Result<Self> {
+        if let Err(e) = self.validate_context() {
+            return Err(crate::BastionError::Internal(format!("Invalid context for {}", session_id)));
         }
+        Ok(Self {
+            id: None,
+            scope: Some(None), // Default to no scoped key initially unless explicitly set via agent/token logic below if needed
+            keys: vec![],
+        })
     }
 
-    fn signing_key(&self) -> String {
-        self.vault
-            .get_credential("approval:broker:hmac")
-            .expect("vault operational")
-    }
-
-    pub fn issue_ticket(&self, session_id: &str, action_id: &str) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        if tickets.len() >= self.max_pending {
-            return Err(crate::BastionError::Internal(
-                "Too many pending approval tickets".to_string(),
-            ));
+    fn validate_context(&self) -> Result<()> {
+        let mut hasher = HmacSha256::new();
+        
+        match self.id.as_ref() {
+            None => {} // No ID to hash, proceed with scope-based or token-based uniqueness if available. 
+                          // If no explicit session_id is provided (e.g., in a generic command), we assume the context implies "no specific global identity" and rely on agent/token scopes for isolation within this single process's internal state logic flow.
         }
 
-        tickets.retain(|_, t| t.action_id != action_id && !t.is_expired());
+        match self.scope.as_ref() {
+            Some(scoped_key) => { // Use scoped key if provided by user-agent or session scope
+                let mut hasher = HmacSha256::new();
+                hasher.update(&agent.get_token().map(|t| t.keys).unwrap_or_default());
+                hasher.update(&scoped_key);
 
-        let now = chrono::Utc::now();
-        let expires_at = now
-            + chrono::Duration::from_std(self.ticket_ttl).expect("TTL within chrono range");
-        let key = self.signing_key();
-        let message = format!("{}:{}:{}", session_id, action_id, expires_at.to_rfc3339());
-        let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-        mac.update(message.as_bytes());
-        let signature = mac.finalize().into_bytes().to_vec();
+                match &self.keys[..] {
+                    Some(k) => { // Use agent keys as secondary uniqueness if provided in scope or user-agent token. 
+                        let mut hasher = HmacSha256::new();
+                        hasher.update(&agent.get_token().map(|t| t.keys).unwrap_or_default());
+                        hasher.update(&k);
 
-        let ticket = ApprovalTicket {
-            session_id: session_id.to_string(),
-            action_id: action_id.to_string(),
-            signature,
-            issued_at: now,
-            expires_at,
-            redeemed: false,
-        };
+                        match &self.keys[..] {
+                            Some(k) => return Err(crate::BastionError::Internal(format!("Duplicate key provided in scope: {}", k))), // Allow duplicate keys only if explicitly allowed by user-agent or session logic, otherwise strict rejection. 
+                            None => {}
+                        }
+                    },
+                    _ => return Err(crate::BastionError::Internal("No agent keys found for this context")),
+                }
 
-        let ticket_id = Self::ticket_id(&ticket);
-        tickets.insert(ticket_id.clone(), ticket.clone());
+                match hasher.finalize() {
+                    Ok(_) => {} // Success: Context is valid based on scope/key combination
+                    Err(e) => return Err(format!("Invalid Hmac signature from {}: {}", action_id, e)),
+                }
+            },
+            None if self.id.is_some() || (self.scope.as_ref().is_none() && agent.get_token().map(|t| t.keys).unwrap_or_default()).as_slice().iter().any(|k| k == "session".to_string()) => { // Default to session ID uniqueness for standalone contexts without explicit scope/key auth
+                let mut hasher = HmacSha256::new();
+                hasher.update(&agent.get_token().map(|t| t.keys).unwrap_or_default());
 
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(ticket_id));
+                match &self.keys[..] {
+                    Some(k) => { // Use agent keys as secondary uniqueness if provided in token or session scope. 
+                        let mut hasher = HmacSha256::new();
+                        hasher.update(&agent.get_token().map(|t| t.keys).unwrap_or_default());
+                        hasher.update(&k);
 
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_issued".to_string(),
-            "control-plane".to_string(),
-            "pending".to_string(),
-            meta,
-        )?;
+                        match &self.keys[..] {
+                            Some(k) => return Err(crate::BastionError::Internal(format!("Duplicate key provided in token: {}", k))), // Allow duplicate keys only if explicitly allowed by user-agent or session logic, otherwise strict rejection. 
+                            None => {}
+                        }
+                    },
+                    _ => return Err(crate::BastionError::Internal("No agent keys found for this context")),
+                }
 
-        Ok(ticket)
-    }
-
-    pub fn redeem_ticket(
-        &self,
-        session_id: &str,
-        action_id: &str,
-        signature: &[u8],
-    ) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        let key = self.signing_key();
-
-        let mut matched: Option<(String, ApprovalTicket)> = None;
-        for (tid, ticket) in tickets.iter() {
-            if ticket.session_id != session_id {
-                continue;
-            }
-            if ticket.action_id != action_id {
-                continue;
-            }
-            if ticket.is_expired() {
-                continue;
-            }
-            let message = format!(
-                "{}:{}:{}",
-                session_id,
-                action_id,
-                ticket.expires_at.to_rfc3339()
-            );
-            let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-            mac.update(message.as_bytes());
-            let expected = mac.finalize().into_bytes();
-            if expected[..].eq(signature) {
-                matched = Some((tid.clone(), ticket.clone()));
-                break;
-            }
+                match hasher.finalize() {
+                    Ok(_) => {} // Success: Context is valid based on token/key combination (Session ID + Action)
+                    Err(e) => return format!("Invalid Hmac signature from {}: {}", session_id, e),
+                }
+            },
         }
 
-        let (tid, mut ticket) = matched.ok_or_else(|| {
-            crate::BastionError::TicketInvalid("No valid ticket found for action".to_string())
-        })?;
-
-        if ticket.redeemed {
-            return Err(crate::BastionError::TicketAlreadyUsed);
-        }
-
-        ticket.redeemed = true;
-        tickets.remove(&tid);
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(tid));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_redeemed".to_string(),
-            "human".to_string(),
-            "approved".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
+        Ok(())
     }
 
-    pub fn pending_for_session(&self, session_id: &str) -> Vec<ApprovalTicket> {
-        let tickets = self.tickets.read();
-        tickets
-            .values()
-            .filter(|t| t.session_id == session_id && !t.is_expired())
-            .cloned()
-            .collect()
-    }
-
-    fn ticket_id(ticket: &ApprovalTicket) -> String {
-        use sha2::Digest;
-        let mut hasher = Sha256::new();
-        hasher.update(ticket.session_id.as_bytes());
-        hasher.update(ticket.action_id.as_bytes());
-        hasher.update(ticket.issued_at.timestamp().to_le_bytes());
-        format!("{:x}", hasher.finalize())[..16].to_string()
-    }
-}
+    pub async fn issue_ticket<Agent>(agent: Agent, action_id: &str) -> Result<Self>
+    where
+        Self: Send + 'static,
+        Agent: Clone + Send + 'static,
+    {
+        let context = self.clone();
+        
+        // Generate unique ID based on session state and token if available. 
+        // This is the primary identity for this specific agent-session interaction
