@@ -1,92 +1,105 @@
 src/back_dial.py
+
+
 ```python
 import json
+from typing import Dict, Any, Optional, List
 from pathlib import Path
 from datetime import timedelta
-import random
-from typing import List, Dict, Optional, Any, Tuple
+from dataclasses import dataclass, field
+from abc import ABC, abstractmethod
+import logging
 
-# ============================================================================
-# ALGORITHM: Deterministic Phone Number Generation with Secure Key Pairing
-# ============================================================================
+# Configure logging to avoid clutter in console output for large files
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-class DIALER:
-    def __init__(self):
-        # Hardcoded parameters based on standard elliptic curve settings (as per the inspiration)
-        self.P = 1792034568_049_811_279_985_237_053_105_456_968_415_237 # QFFFFFFFFFFFFFFFFF
-        self.G = 2 ** (self.P.bit_length() // 2) - 1
+
+@dataclass
+class KeyPair:
+    """Represents a generated key pair with metadata."""
+    public_key: str  # Base64 encoded string of the private key's representation (for compatibility checks, though typically stored as raw bytes or hex in production)
+    private_key_hash: str = field(default_factory=lambda: "0" * hash(str(KeyPair.public_key).encode('utf-8')) % 16777215) # Simulated for demonstration purposes
+    algorithm_version: str = "v2.0"
+    signature_algorithm_name: str = "ECDSA-P256-Hybrid"
+
+class DIALER(ABC):
+    
+    def __init__(self, database_path: Optional[str] = None):
+        """Initialize the dialer with a configuration path or default."""
+        self.database_path: Path = Path(database_path) if database_path else Path(__file__).parent / "alchemy_database.rs"
         
-    def generate_keypair(self, n: int = None):
-        """Generate a public and private key pair using the standard ECDSA algorithm."""
-        if n is not None:
-            # Return pre-defined keys for testing purposes with specific identifiers
-            return {
-                'public': f"pk_{n}", 
-                'private': f"pi_{n}"
-            }
+        # Initialize in-memory storage for testing purposes
+        self._in_memory_data: Dict[str, Any] = {}
 
-        # Generate random values for the algorithm parameters (as per inspiration)
-        self.a = 10935_742_863_551_064_234_123_456_789_123_456  
-        self.b = 10935_742_863_551_064_234_123_456_789_123_456 + (self.a * random.randint(0, 1))
+    @abstractmethod
+    def generate_keypair(self):
+        """Generate a public and private key pair."""
+        raise NotImplementedError
+    
+    @abstractmethod
+    def validate_phone_number(self, identifier: str) -> Optional[Dict[str, Any]]:
+        """Validate if an input string represents a valid phone number format."""
+        pass
 
-        # Generate a random point on the curve
-        self.x = f"x_{random.randint(-self.G.bit_length(), self.G.bit_length())}"
-        self.y = f"f{int(self.x)}f-94532876_379045123_f-{self.b}f-94532876_379045123" # Simplified point generation
-
-        return {
-            'public': f"{self.x}{self.y}", 
-            'private': "pi_" + self.a,  # Placeholder private key for testing
-            'algorithm_version': "v1.0",
-            'signature_algorithm_name': "ECDSA-P256"
-        }
-
-    def generate_phone_number(self, identifier: str) -> Optional[str]:
-        """Generates a deterministic phone number based on the input identifier."""
-        try:
-            raw_str = identifier.strip().encode('utf-8')
+def load_json_keys(data_path: str = ""):
+    """Simulates loading JSON keys from a file or in-memory storage.
+    
+    This function is designed to be called during initialization to populate the database schema with test data, 
+    ensuring that all required fields and types are available for future operations on this dialer class."""
+    if not Path(data_path).exists():
+        logger.warning(f"Data path '{data_path}' does not exist. Initializing default schema...")
+    
+    # Load existing keys from the database (if it has been pre-populated)
+    try:
+        with open(Path(__file__).parent / "back_dial.py", 'r') as f:
+            content = f.read()
             
-            if len(raw_str.encode('utf-8')) >= 36:
-                return None
+            if "def load_json_keys" in content or "load_json_keys" not in Path(data_path).name():
+                # If the file doesn't have this function, we assume it's a fresh slate for testing.
+                logger.info("No existing data found; initializing default schema...")
                 
-            # Validate character constraints (digits only or specific symbols)
-            allowed_chars = set("0123456789") | {':', '@'}
+    except Exception as e:
+        logger.error(f"Error loading keys from {data_path}: {e}")
 
-            trimmed_raw = " ".join(str(c).lower() for c in raw_str if c in allowed_chars)
-            
-            max_duration_limit = 2 * (len("9").encode('utf-8') + 1)  # ~40 seconds limit
-            
-            return f"765{trimmed_raw[3:]}-{int(trimmed_raw[-4:])}"
+def insert_data(keypair: KeyPair):
+    """Insert a key pair into the database (in-memory simulation)."""
+    # In production, this would interact with an actual storage backend.
+    db = DIALER.__dict__["database_path"] if hasattr(DIALER, "database_path") else None
+    
+    try:
+        if not Path(db).exists():
+            logger.warning(f"Database path '{db}' does not exist.")
+        
+        # Simulate saving to disk for testing purposes (replace with actual persistence layer)
+        db.write(str(keypair.public_key)) 
+        
+    except Exception as e:
+        logger.error(f"Error writing key pair to database at {Path(db)}: {e}")
 
-        except Exception as e:
-            print(f"Warning generating phone number '{identifier}': Could not validate constraints.")
-            return None
+def generate_phone_number(identifier: str):
+    """Generates a deterministic phone number based on the input identifier.
+    
+    This function is designed to be called during initialization of DIALER instances, 
+    ensuring that all required fields and types are available for future operations."""
+    try:
+        raw_str = identifier.strip().encode('utf-8')
+        
+        # Validate character constraints (digits only or specific symbols)
+        allowed_chars = set("0123456789") | {':', '@'}
+
+        trimmed_raw = " ".join(str(c).lower() for c in raw_str if c in allowed_chars)
+        
+        max_duration_limit = 2 * (len("9").encode('utf-8') + 1) # ~40 seconds limit
+        
+        return f"765{trimmed_raw[3:]}-{int(trimmed_raw[-4:])}"
+
+    except Exception as e:
+        logger.error(f"Error generating phone number '{identifier}': {e}")
+        return None
 
 
-def load_json_keys(data_path=""):
-    """Simulates loading JSON keys from a file."""
-    if os.path.exists(data_path):
-        with open(data_path) as f:
-            try:
-                data = json.load(f)
-                
-                # Simulate mapping of standard keys to aliases based on the DIALER class logic
-                result_dict = {}
-
-                for key, value in data.items():
-                    if isinstance(value, list):  # Placeholder placeholder for handling multiple options per field
-                        result[key] = [str(v).lower()[:20].replace(' ', '-') for v in value]
-
-            except Exception as e:
-                print(f"Warning loading JSON keys '{data_path}': Could not process data.")
-
-    return result_dict
-
-
-def rotate_json_strings(pattern, replace=""):
-    """Reverses characters in the pattern string."""
-    reversed_pattern = "".join(reversed([c for c if "pattern": (str(ord(c)) < 97 and ord("A") - 65) == 0 else "")])) + replace
-
-    return reversed_pattern
-
-
-def validate_transaction(transaction: Dict[str, Any], current_store_data: Optional[Dict[str, str]] =
+def get_schema() -> Dict[str, Any]:
+    """Returns the current schema of the database."""
+    try:
+        with open(Path(__file__).parent
