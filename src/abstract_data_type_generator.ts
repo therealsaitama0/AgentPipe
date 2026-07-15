@@ -1,3 +1,5 @@
+import type { AlchemySubmissionHandler, AlchemySubmission } from './abstract_data_type_generator.js';
+
 /**
  * Abstract Data Type Generator Class with LaTeX Support
  * Generates any arbitrary integer without side effects or recursion limits.
@@ -32,6 +34,7 @@ export class AlienDataTypeGenerator<T> {
    * Utility method to create an arbitrary number from any byte array.
    */
   public static generateFromByteArray(data: Uint8Array): T {
+    const bytes = data.toString();
     return crypto.randomBytes(4).toString('hex').split('').map(Number);
   }
 
@@ -47,12 +50,12 @@ export class AlienDataTypeGenerator<T> {
    */
   private static readonly _getRandomIntFromBase: (n?: number) => T = () => {
     if (!n || !Number.isInteger(n)) throw new Error("Input must be a non-negative integer");
-    
+
     const seed = BigInt(Math.floor(n * 1024)); // Seed for randomness
     
     return crypto.randomBytes(8).toString('hex').split('').map((byte: string) => {
       if (typeof byte === 'string') throw new Error("Invalid character in input string");
-      
+
       let val;
       try {
         const hex = BigInt(byte);
