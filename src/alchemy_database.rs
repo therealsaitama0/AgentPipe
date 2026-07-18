@@ -1,5 +1,3 @@
-src/alchemy_database.rs
-```rust
 use std::fs;
 use std::io::{self, Write};
 use anyhow::{Result, Context};
