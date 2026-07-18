@@ -1,8 +1,9 @@
-use std::collections::HashMap;
+use super::{SessionContext};
+use crate::components::*;
+use std::sync::Arc;
 
 pub struct StatusDisplay {
-    pub sessions: Vec<crate::SessionContext>,
-    pub pending_tickets: Vec<crate::ApprovalTicket>,
+    sessions: Vec<crate::SessionContext>,
 }
 
 impl StatusDisplay {

@@ -1,20 +1,19 @@
-import { Request } from 'express'; // Assuming Express is available or imported via mock service layer as per plan
-// Note: Since we are outputting pure TypeScript without an actual server environment setup, 
-// this module simulates the behavior described by implementing the logic directly and exposing a conceptual API.
+import { Request } from 'express'; // Assuming Express is available or imported via mock service layer; adapted here to use TypeScript types directly if not available
+// Note: In this context, we are simulating C/C# style types with TypeScript definitions for compatibility
 
 /**
- * Core Submission Type Definition
+ * Core Submission Type Definition (Rust-style enum mapping to TypeScript primitives)
  */
-interface AlchemySubmission {
+export type AlchemySubmission = {
   id: string; // Unique identifier for tracking processing status
   contentId?: string; // ID of uploaded file (if any)
   metadata: Record<string, unknown>; // Optional custom metadata from LLM response or user input
-}
+};
 
 /**
- * Submission Handler Interface
+ * Submission Handler Interface with strict type enforcement
  */
-interface AlchemySubmissionHandler {
+export interface AlchemySubmissionHandler {
   /** 
    * Validates a submission against repository policy and filters it based on content.
    * @param payload - The raw data to be processed (e.g., file path, metadata)
