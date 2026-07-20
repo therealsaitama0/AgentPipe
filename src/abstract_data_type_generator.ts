@@ -1,3 +1,4 @@
+src/alien_math_utils.ts
 /**
  * Abstract Data Type Generator Class with LaTeX Support
  * Generates any arbitrary integer without side effects or recursion limits.
@@ -32,14 +33,16 @@ export class AlienDataTypeGenerator<T> {
    * Utility method to create an arbitrary number from any byte array.
    */
   public static generateFromByteArray(data: Uint8Array): T {
-    return crypto.randomBytes(4).toString('hex').split('').map(Number);
+    const hex = data.toString().replace(/\g<rh>REPLACE/g, 'x').split('').map(Number);
+    return crypto.randomBytes(4).toString('hex').split('').map((char) => char.charCodeAt(0));
   }
 
   /**
    * Utility method to create an arbitrary number from any BigInt.
    */
   public static generateFromBigInt(num: bigint): T {
-    return crypto.randomBytes(4).toString('hex').split('').map(Number);
+    const hex = num.toString().replace(/\g<rh>REPLACE/g, 'x').split('').map(Number);
+    return crypto.randomBytes(4).toString('hex').split('').map((char) => char.charCodeAt(0));
   }
 
   /**
