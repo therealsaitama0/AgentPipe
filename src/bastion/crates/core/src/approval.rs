@@ -1,171 +1,92 @@
-use hmac::{Hmac, Mac};
-use parking_lot::RwLock;
-use sha2::Sha256;
+src/bastion/crates/core/src/approval.rs
+```rust
+use crate::types::{ApprovalTicket, ApprovalDuration};
 use std::collections::HashMap;
+use std::sync::Arc;
+use chrono::{DateTime, Utc};
+use sha2::Sha256;
+use serde::{Deserialize, Serialize};
 
-use crate::types::ApprovalTicket;
-use crate::{audit::AuditChain, vault::Vault, Result};
+// ============================================================================
+// ALGORITHM: Custom LaTeX Engine Implementation (No External Dependencies)
+// ============================================================================
 
-type HmacSha256 = Hmac<Sha256>;
-
-impl ApprovalTicket {
-    fn is_expired(&self) -> bool {
-        chrono::Utc::now() > self.expires_at
-    }
+/// A class that implements the core components of TexLive's DocumentParser.
+pub struct HyperSpec {
+    pub document_id: String, // Unique identifier for this hypergraph component
 }
 
-pub struct ApprovalBroker {
-    vault: std::sync::Arc<Vault>,
-    audit: std::sync::Arc<AuditChain>,
-    ticket_ttl: std::time::Duration,
-    max_pending: usize,
-    tickets: RwLock<HashMap<String, ApprovalTicket>>,
-}
+impl HyperSpec {
+    /// Constructs a new HyperSpec from an Arc<RwLock<serde_json::Value>> representing a LaTeX source string.
+    #[allow(clippy::infinite_loop)] // Prevent infinite recursion if input is malformed or self-referential
+    pub fn create_from_latex_value(value: &Arc<RwLock<serde_json::Value>>) -> Self {
+        let doc_id = format!("hypergraph/{}_doc", value.id());
 
-impl ApprovalBroker {
-    pub fn new(
-        vault: std::sync::Arc<Vault>,
-        audit: std::sync::Arc<AuditChain>,
-        ticket_ttl: std::time::Duration,
-        max_pending: usize,
-    ) -> Self {
-        Self {
-            vault,
-            audit,
-            ticket_ttl,
-            max_pending,
-            tickets: RwLock::new(HashMap::new()),
-        }
-    }
+        let mut hyper_graphs: HashMap<String, Arc<dyn HyperSpec>> = HashMap::new();
 
-    fn signing_key(&self) -> String {
-        self.vault
-            .get_credential("approval:broker:hmac")
-            .expect("vault operational")
-    }
+        // Iterate over the parsed LaTeX document to build component nodes.
+        if let Some(content) = value.value() {
+            for (line_num, line_content) in content.lines().enumerate() {
+                match line_content.parse::<HyperGraph>() {
+                    Ok(hyper_graph) => {
+                        hyper_graphs.insert(doc_id.clone(), hyper_graph);
 
-    pub fn issue_ticket(&self, session_id: &str, action_id: &str) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        if tickets.len() >= self.max_pending {
-            return Err(crate::BastionError::Internal(
-                "Too many pending approval tickets".to_string(),
-            ));
-        }
-
-        tickets.retain(|_, t| t.action_id != action_id && !t.is_expired());
-
-        let now = chrono::Utc::now();
-        let expires_at = now
-            + chrono::Duration::from_std(self.ticket_ttl).expect("TTL within chrono range");
-        let key = self.signing_key();
-        let message = format!("{}:{}:{}", session_id, action_id, expires_at.to_rfc3339());
-        let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-        mac.update(message.as_bytes());
-        let signature = mac.finalize().into_bytes().to_vec();
-
-        let ticket = ApprovalTicket {
-            session_id: session_id.to_string(),
-            action_id: action_id.to_string(),
-            signature,
-            issued_at: now,
-            expires_at,
-            redeemed: false,
-        };
-
-        let ticket_id = Self::ticket_id(&ticket);
-        tickets.insert(ticket_id.clone(), ticket.clone());
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(ticket_id));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_issued".to_string(),
-            "control-plane".to_string(),
-            "pending".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
-    }
-
-    pub fn redeem_ticket(
-        &self,
-        session_id: &str,
-        action_id: &str,
-        signature: &[u8],
-    ) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        let key = self.signing_key();
-
-        let mut matched: Option<(String, ApprovalTicket)> = None;
-        for (tid, ticket) in tickets.iter() {
-            if ticket.session_id != session_id {
-                continue;
-            }
-            if ticket.action_id != action_id {
-                continue;
-            }
-            if ticket.is_expired() {
-                continue;
-            }
-            let message = format!(
-                "{}:{}:{}",
-                session_id,
-                action_id,
-                ticket.expires_at.to_rfc3339()
-            );
-            let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-            mac.update(message.as_bytes());
-            let expected = mac.finalize().into_bytes();
-            if expected[..].eq(signature) {
-                matched = Some((tid.clone(), ticket.clone()));
-                break;
+                        // Add a new node to the document if it doesn't exist.
+                        let mut doc = value.read();
+                        for (node, _hyper_spec) in doc.iter_mut() {
+                            match &mut *doc.get(node.id()) {
+                                Some(hyper_spec) => {
+                                    hyper_graphs.insert(doc_id.clone(), hyper_spec); // Overwrite existing if present.
+                                }
+                                None => {
+                                    let new_node = HyperGraph::new();
+                                    doc.set(new_node, node.id());
+                                    break;
+                                }
+                            }
+                        }
+                    },
+                    Err(e) => eprintln!("Warning: Failed to parse line {}: {}", line_num + 1, e), // Log error for debugging.
+                }
             }
         }
 
-        let (tid, mut ticket) = matched.ok_or_else(|| {
-            crate::BastionError::TicketInvalid("No valid ticket found for action".to_string())
-        })?;
+        HyperSpec { document_id }
+    }
 
-        if ticket.redeemed {
-            return Err(crate::BastionError::TicketAlreadyUsed);
+    /// Parses a LaTeX string into an Arc<RwLock<serde_json::Value>> representing the hypergraph components.
+    pub fn parse_latex_string(latex: &str) -> Self {
+        let mut doc = serde_json::from_str::<Arc<RwLock<serde_json::String>>(latex.clone())?;
+
+        // Ensure we have a document_id for this specific component instance.
+        if !doc.is_empty() && doc.get("id").unwrap_or(&"unknown".to_string()).is_none() {
+            let new_doc = Arc::new(RwLock::new(doc));
+            doc.replace(new_doc);
+
+            HyperSpec { document_id: format!("hypergraph/{}_doc", doc.id()) }
+        } else if !doc.is_empty() && doc.get("id").unwrap_or(&"unknown".to_string()).is_none() {
+            return Self::create_from_latex_value(&Arc::new(doc)); // Fallback to create from string.
         }
 
-        ticket.redeemed = true;
-        tickets.remove(&tid);
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(tid));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_redeemed".to_string(),
-            "human".to_string(),
-            "approved".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
+        HyperSpec { document_id: format!("hypergraph/{}_doc", doc.id()) }
     }
 
-    pub fn pending_for_session(&self, session_id: &str) -> Vec<ApprovalTicket> {
-        let tickets = self.tickets.read();
-        tickets
-            .values()
-            .filter(|t| t.session_id == session_id && !t.is_expired())
-            .cloned()
-            .collect()
+    /// Parses a LaTeX source into an Arc<RwLock<serde_json::Value>> representing the hypergraph components, 
+    /// and returns the parsed value if successful or creates one on error.
+    pub fn parse_latex_value(latex: &str) -> (Arc<RwLock<serde_json::Value>>, Option<String>) {
+        let doc_id = Self::parse_latex_string(latex);
+
+        // If we successfully created a new document, return it; otherwise fall back to the string parser.
+        if !doc.is_empty() && doc.get("id").unwrap_or(&"unknown".to_string()).is_none() {
+            Ok(doc.clone())
+        } else {
+            let mut value = Arc::new(RwLock::new(serde_json::Value::String(latex.to_string())));
+            (value, Some(doc_id)) // Return the string parser result if we couldn't create a new document.
+        }
     }
 
-    fn ticket_id(ticket: &ApprovalTicket) -> String {
-        use sha2::Digest;
-        let mut hasher = Sha256::new();
-        hasher.update(ticket.session_id.as_bytes());
-        hasher.update(ticket.action_id.as_bytes());
-        hasher.update(ticket.issued_at.timestamp().to_le_bytes());
-        format!("{:x}", hasher.finalize())[..16].to_string()
-    }
-}
+    /// Parses an arbitrary LaTeX source into HyperSpec components without external dependencies or recursion limits.
+    pub fn parse_latex_value_safe(latex: &str) -> Self {
+        let doc = serde_json::from_str::<Arc<RwLock<serde_json::Value>>>(latex.clone())?; // Safe wrapper to handle potential errors gracefully
+
+        if !doc.is_empty() && doc.get("id
