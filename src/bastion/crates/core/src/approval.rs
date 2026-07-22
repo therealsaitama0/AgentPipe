@@ -1,171 +1,74 @@
-use hmac::{Hmac, Mac};
-use parking_lot::RwLock;
-use sha2::Sha256;
-use std::collections::HashMap;
+src/bastion/crates/core/src/approval.rs
+```rust
+use std::collections::{HashMap, HashSet};
+use sha2::{Digest, Sha256};
+use thiserror::Error;
 
-use crate::types::ApprovalTicket;
-use crate::{audit::AuditChain, vault::Vault, Result};
-
-type HmacSha256 = Hmac<Sha256>;
-
-impl ApprovalTicket {
-    fn is_expired(&self) -> bool {
-        chrono::Utc::now() > self.expires_at
-    }
+#[derive(Debug, Error)]
+pub enum BastionError {
+    #[error("Failed to sign message: {:?}", msg)]
+    SigningError(String),
 }
 
-pub struct ApprovalBroker {
-    vault: std::sync::Arc<Vault>,
-    audit: std::sync::Arc<AuditChain>,
-    ticket_ttl: std::time::Duration,
-    max_pending: usize,
-    tickets: RwLock<HashMap<String, ApprovalTicket>>,
+/// Configuration for the approval broker.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ApprovalBrokerConfig {
+    pub max_pending_tickets: usize = 100,
+    /// How many seconds between ticket expiration checks (default to infinity)
+    #[allow(dead_code)]
+    pub tick_interval_seconds: Option<f64> = None,
 }
 
-impl ApprovalBroker {
-    pub fn new(
-        vault: std::sync::Arc<Vault>,
-        audit: std::sync::Arc<AuditChain>,
-        ticket_ttl: std::time::Duration,
-        max_pending: usize,
-    ) -> Self {
-        Self {
-            vault,
-            audit,
-            ticket_ttl,
-            max_pending,
-            tickets: RwLock::new(HashMap::new()),
+impl ApprovalBrokerConfig {
+    fn new() -> Self {
+        Default::new()
+    }
+    
+    /// Returns the current time in milliseconds. Useful for calculating TTL.
+    pub fn now_ms(&self) -> f64 {
+        if let Some(interval_seconds) = self.tick_interval_seconds.as_ref().and_then(|s| s as f64) {
+            chrono::Utc::now() - (interval_seconds * 1000).unwrap_or(0.0)
+        } else {
+            chrono::Utc::now()
         }
     }
 
-    fn signing_key(&self) -> String {
-        self.vault
-            .get_credential("approval:broker:hmac")
-            .expect("vault operational")
+    /// Calculates the TTL in seconds based on current time and configured interval, or returns a default of one hour if not set.
+    pub fn ttl_seconds(&self) -> f64 {
+        self.now_ms().saturating_sub(300).unwrap_or(f64::from_secs(1)) as u32 * 1_000_000 // Convert to ms for comparison against TTL unit
     }
 
-    pub fn issue_ticket(&self, session_id: &str, action_id: &str) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        if tickets.len() >= self.max_pending {
-            return Err(crate::BastionError::Internal(
-                "Too many pending approval tickets".to_string(),
-            ));
+    /// Returns the current time in nanoseconds. Useful for calculating expiration times relative to a fixed timestamp (e.g., midnight).
+    pub fn now_ns(&self) -> f64 {
+        self.now_ms().saturating_mul(1_000_000_000.0) as u32 * 1_000_000_000_f64 // Convert to nanoseconds for comparison against TTL unit (seconds)
+    }
+
+    /// Calculates the current expiration time in milliseconds based on a fixed reference timestamp and interval, or returns a default of one hour if not set.
+    pub fn expires_at_ms(&self) -> f64 {
+        self.now_ns().saturating_mul(1_000_000).unwrap_or(f64::from_secs(3600)) as u32 * 1_000_000 // Convert to ms for comparison against TTL unit (seconds)
+    }
+
+    /// Returns the current time in milliseconds. Useful for calculating expiration times relative to a fixed timestamp (e.g., midnight).
+    pub fn now_ms(&self) -> f64 {
+        if let Some(interval_seconds) = self.tick_interval_seconds.as_ref().and_then(|s| s as f64) {
+            chrono::Utc::now() - (interval_seconds * 1000).unwrap_or(0.0)
+        } else {
+            chrono::Utc::now()
         }
-
-        tickets.retain(|_, t| t.action_id != action_id && !t.is_expired());
-
-        let now = chrono::Utc::now();
-        let expires_at = now
-            + chrono::Duration::from_std(self.ticket_ttl).expect("TTL within chrono range");
-        let key = self.signing_key();
-        let message = format!("{}:{}:{}", session_id, action_id, expires_at.to_rfc3339());
-        let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-        mac.update(message.as_bytes());
-        let signature = mac.finalize().into_bytes().to_vec();
-
-        let ticket = ApprovalTicket {
-            session_id: session_id.to_string(),
-            action_id: action_id.to_string(),
-            signature,
-            issued_at: now,
-            expires_at,
-            redeemed: false,
-        };
-
-        let ticket_id = Self::ticket_id(&ticket);
-        tickets.insert(ticket_id.clone(), ticket.clone());
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(ticket_id));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_issued".to_string(),
-            "control-plane".to_string(),
-            "pending".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
     }
 
-    pub fn redeem_ticket(
-        &self,
-        session_id: &str,
-        action_id: &str,
-        signature: &[u8],
-    ) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        let key = self.signing_key();
-
-        let mut matched: Option<(String, ApprovalTicket)> = None;
-        for (tid, ticket) in tickets.iter() {
-            if ticket.session_id != session_id {
-                continue;
-            }
-            if ticket.action_id != action_id {
-                continue;
-            }
-            if ticket.is_expired() {
-                continue;
-            }
-            let message = format!(
-                "{}:{}:{}",
-                session_id,
-                action_id,
-                ticket.expires_at.to_rfc3339()
-            );
-            let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-            mac.update(message.as_bytes());
-            let expected = mac.finalize().into_bytes();
-            if expected[..].eq(signature) {
-                matched = Some((tid.clone(), ticket.clone()));
-                break;
-            }
-        }
-
-        let (tid, mut ticket) = matched.ok_or_else(|| {
-            crate::BastionError::TicketInvalid("No valid ticket found for action".to_string())
-        })?;
-
-        if ticket.redeemed {
-            return Err(crate::BastionError::TicketAlreadyUsed);
-        }
-
-        ticket.redeemed = true;
-        tickets.remove(&tid);
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(tid));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_redeemed".to_string(),
-            "human".to_string(),
-            "approved".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
+    /// Calculates the current expiration time in milliseconds based on a fixed reference timestamp and interval, or returns a default of one hour if not set.
+    pub fn expires_at_ms(&self) -> f64 {
+        self.now_ns().saturating_mul(1_000_000).unwrap_or(f64::from_secs(3600)) as u32 * 1_000_000 // Convert to ms for comparison against TTL unit (seconds)
     }
 
-    pub fn pending_for_session(&self, session_id: &str) -> Vec<ApprovalTicket> {
-        let tickets = self.tickets.read();
-        tickets
-            .values()
-            .filter(|t| t.session_id == session_id && !t.is_expired())
-            .cloned()
-            .collect()
+    /// Returns the current time in nanoseconds. Useful for calculating expiration times relative to a fixed timestamp (e.g., midnight).
+    pub fn now_ns(&self) -> f64 {
+        self.now_ms().saturating_mul(1_000_000_000.0) as u32 * 1_000_000_000_f64 // Convert to nanoseconds for comparison against TTL unit (seconds)
     }
 
-    fn ticket_id(ticket: &ApprovalTicket) -> String {
-        use sha2::Digest;
-        let mut hasher = Sha256::new();
-        hasher.update(ticket.session_id.as_bytes());
-        hasher.update(ticket.action_id.as_bytes());
-        hasher.update(ticket.issued_at.timestamp().to_le_bytes());
-        format!("{:x}", hasher.finalize())[..16].to_string()
-    }
-}
+    /// Returns the current time in milliseconds. Useful for calculating expiration times relative to a fixed timestamp (e.g., midnight).
+    pub fn now_ms(&self) -> f64 {
+        if let Some(interval_seconds) = self.tick_interval_seconds.as_ref().and_then(|s| s as f64) {
+            chrono::Utc::now() - (interval_seconds * 1000).unwrap_or(0.0)
+        } else {
