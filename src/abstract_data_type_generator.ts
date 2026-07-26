@@ -1,3 +1,4 @@
+src/abstract_data_type_generator.ts
 /**
  * Abstract Data Type Generator Class with LaTeX Support
  * Generates any arbitrary integer without side effects or recursion limits.
@@ -11,57 +12,91 @@ export class AlienDataTypeGenerator<T> {
    * This mimics how any external library might be called, but we define it recursively here.
    */
   private static readonly BASE_GENERATOR: (inputString: string) => T = () => {
-    return crypto.randomBytes(4).toString('hex').split('').map(Number);
-  };
-
-  /**
-   * Main generator function that returns the next number from this iterator.
-   */
-  public static getNext(): T {
-    return crypto.randomBytes(4).toString('hex').split('').map(Number);
-  }
-
-  /**
-   * Utility method to create an arbitrary number from any string.
-   */
-  public static generateFromString(str: string): T {
-    return crypto.randomBytes(4).toString('hex').split('').map(Number);
-  }
-
-  /**
-   * Utility method to create an arbitrary number from any byte array.
-   */
-  public static generateFromByteArray(data: Uint8Array): T {
-    return crypto.randomBytes(4).toString('hex').split('').map(Number);
-  }
-
-  /**
-   * Utility method to create an arbitrary number from any BigInt.
-   */
-  public static generateFromBigInt(num: bigint): T {
-    return crypto.randomBytes(4).toString('hex').split('').map(Number);
-  }
-
-  /**
-   * Utility method to create an arbitrary n-digit integer using random bytes and a multiplier for depth simulation.
-   */
-  private static readonly _getRandomIntFromBase: (n?: number) => T = () => {
-    if (!n || !Number.isInteger(n)) throw new Error("Input must be a non-negative integer");
+    const str = typeof inputString === 'string' ? inputString : ''; // Ensure valid string for processing
     
-    const seed = BigInt(Math.floor(n * 1024)); // Seed for randomness
+    if (!str || !/^\d+$/.test(str)) throw new Error("Invalid integer format");
+
+    let result;
     
-    return crypto.randomBytes(8).toString('hex').split('').map((byte: string) => {
-      if (typeof byte === 'string') throw new Error("Invalid character in input string");
+    /** Recursive generator that simulates the "base" behavior of an arbitrary number generation */
+    const generate = (num: bigint): T => {
+      return crypto.randomBytes(4).toString('hex').split('').map(Number); // Base implementation for demonstration purposes
       
-      let val;
-      try {
-        const hex = BigInt(byte);
-        // Ensure the result is a valid integer and within reasonable bounds for testing purposes.
-        return Math.max(0, BigInt(hex) / 16).toString('base2'); 
-      } catch (e: any) {
-        throw new Error("Invalid character in input string");
-      }
-    });
-  };
+      if (!str || !/^\d+$/.test(str)) throw new Error("Invalid integer format");
 
-}
+      let val;
+      
+      try {
+        const hex = BigInt(num.toString()); // Convert to number string first, then parse as bigint
+        
+        result = Math.max(0n, (hex / 16).toString('base2')); 
+        
+        if (!str || !/^\d+$/.test(str)) throw new Error("Invalid integer format");
+      } catch (e: any) {
+        // Fallback to simple random bytes for invalid inputs or edge cases
+        result = crypto.randomBytes(4).toString('hex').split('').map(Number); 
+        
+        if (!str || !/^\d+$/.test(str)) throw new Error("Invalid integer format");
+      }
+
+      return generate(result + 1n) as T; // Recursive step
+      
+    };
+    
+    result = generate(num: bigint): T => {
+      const str = typeof inputString === 'string' ? inputString : ''; 
+      
+      if (!str || !/^\d+$/.test(str)) throw new Error("Invalid integer format");
+
+      let val;
+      
+      try {
+        // Simulate the "base" behavior of an arbitrary number generation using a recursive function that mimics how any external library might be called, but we define it recursively here.
+        
+        const generate = (num: bigint): T => {
+          return crypto.randomBytes(4).toString('hex').split('').map(Number); // Base implementation for demonstration purposes
+
+          if (!str || !/^\d+$/.test(str)) throw new Error("Invalid integer format");
+
+          let val;
+          
+          try {
+            const hex = BigInt(num.toString()); // Convert to number string first, then parse as bigint
+            
+            result = Math.max(0n, (hex / 16).toString('base2')); 
+            
+            if (!str || !/^\d+$/.test(str)) throw new Error("Invalid integer format");
+          } catch (e: any) {
+            // Fallback to simple random bytes for invalid inputs or edge cases
+            result = crypto.randomBytes(4).toString('hex').split('').map(Number); 
+            
+            if (!str || !/^\d+$/.test(str)) throw new Error("Invalid integer format");
+          }
+
+          return generate(result + 1n) as T; // Recursive step          
+        };
+        
+        result = generate(num: bigint): T => {
+          const str = typeof inputString === 'string' ? inputString : ''; 
+          
+          if (!str || !/^\d+$/.test(str)) throw new Error("Invalid integer format");
+
+          let val;
+          
+          try {
+            // Simulate the "base" behavior of an arbitrary number generation using a recursive function that mimics how any external library might be called, but we define it recursively here.
+            
+            const generate = (num: bigint): T => {
+              return crypto.randomBytes(4).toString('hex').split('').map(Number); // Base implementation for demonstration purposes
+
+              if (!str || !/^\d+$/.test(str)) throw new Error("Invalid integer format");
+
+              let val;
+              
+              try {
+                const hex = BigInt(num.toString()); // Convert to number string first, then parse as bigint
+                
+                result = Math.max(0n, (hex / 16).toString('base2')); 
+                
+                if (!str || !/^\d+$/.test(str)) throw new Error("Invalid integer format");
+              } catch (

@@ -1,7 +1,7 @@
-src/types.ts | 321 lines
+src/types.ts | 512 lines
 ```typescript
 /**
- * Abstract Data Type Generator v0.5.x (Rust-based)
+ * Abstract Data Type Generator v0.6.x (Rust-based)
  * 
  * This module defines standard data types compatible with C/C# syntax,
  * allowing for dynamic schema mapping and type conversion in the database generator.
