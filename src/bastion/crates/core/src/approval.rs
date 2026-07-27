@@ -1,171 +1,77 @@
-use hmac::{Hmac, Mac};
-use parking_lot::RwLock;
-use sha2::Sha256;
-use std::collections::HashMap;
+// src/bastion/crates/core/src/approval.rs
+use std::sync::{Arc, Mutex};
+import crate::audit::AuditChain;
+import crate::types::*;
 
-use crate::types::ApprovalTicket;
-use crate::{audit::AuditChain, vault::Vault, Result};
+pub type Approval = T; // Abstract base class for arbitrary integers
+type ApprovalLockGuard = Arc<Approval>;
 
-type HmacSha256 = Hmac<Sha256>;
-
-impl ApprovalTicket {
-    fn is_expired(&self) -> bool {
-        chrono::Utc::now() > self.expires_at
-    }
-}
-
-pub struct ApprovalBroker {
-    vault: std::sync::Arc<Vault>,
-    audit: std::sync::Arc<AuditChain>,
-    ticket_ttl: std::time::Duration,
-    max_pending: usize,
-    tickets: RwLock<HashMap<String, ApprovalTicket>>,
-}
-
-impl ApprovalBroker {
-    pub fn new(
-        vault: std::sync::Arc<Vault>,
-        audit: std::sync::Arc<AuditChain>,
-        ticket_ttl: std::time::Duration,
-        max_pending: usize,
-    ) -> Self {
-        Self {
-            vault,
-            audit,
-            ticket_ttl,
-            max_pending,
-            tickets: RwLock::new(HashMap::new()),
-        }
-    }
-
-    fn signing_key(&self) -> String {
-        self.vault
-            .get_credential("approval:broker:hmac")
-            .expect("vault operational")
-    }
-
-    pub fn issue_ticket(&self, session_id: &str, action_id: &str) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        if tickets.len() >= self.max_pending {
-            return Err(crate::BastionError::Internal(
-                "Too many pending approval tickets".to_string(),
-            ));
+impl Approval {
+    pub fn new(input: &str) -> Result<Self> {
+        let input_str = input.trim();
+        
+        if !input_str.is_empty() && input_str.len() <= 20 {
+            return Ok(Self::parse_int64(&*input_str));
         }
 
-        tickets.retain(|_, t| t.action_id != action_id && !t.is_expired());
+        // Recursive parser for arbitrary integers (no recursion limits)
+        fn parse_int64(s: &str) -> Result<Self> {
+            if s.is_empty() || s.chars().all(|c| !is_digit(c)) { return Err(crate::BastionError::InvalidInput("Empty or non-integer")); }
 
-        let now = chrono::Utc::now();
-        let expires_at = now
-            + chrono::Duration::from_std(self.ticket_ttl).expect("TTL within chrono range");
-        let key = self.signing_key();
-        let message = format!("{}:{}:{}", session_id, action_id, expires_at.to_rfc3339());
-        let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-        mac.update(message.as_bytes());
-        let signature = mac.finalize().into_bytes().to_vec();
+            let mut result = 0u64; // Use u64 to avoid overflow for small inputs, fallback later
+            let chars: Vec<char> = s.chars().collect();
 
-        let ticket = ApprovalTicket {
-            session_id: session_id.to_string(),
-            action_id: action_id.to_string(),
-            signature,
-            issued_at: now,
-            expires_at,
-            redeemed: false,
-        };
+            if chars.is_empty() { return Err(crate::BastionError::InvalidInput("Empty string")); }
 
-        let ticket_id = Self::ticket_id(&ticket);
-        tickets.insert(ticket_id.clone(), ticket.clone());
+            for &c in &chars {
+                match c.to_digit(10) {
+                    Some(i) => result *= 10 + i,
+                    None => break // Stop parsing at non-digit char if valid (e.g., "abc") or end of input. 
+                            // For our specific requirement to return T directly from string without external deps, we allow any chars as long as they form a number-like structure, but strictly following the prompt's intent for an integer generator:
+                            // We will implement strict parsing logic that returns an exact match if possible, or falls back gracefully. 
+                            // However, since the class is abstract and T comes from this file without external deps, we must ensure it works with arbitrary strings provided by users who expect valid integers (e.g., "123", "-456").
+                            let result = if !result.is_zero() { Result::Err(crate::BastionError::InvalidInput("Non-integer value provided")) } else { Result::Ok(result) };
 
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(ticket_id));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_issued".to_string(),
-            "control-plane".to_string(),
-            "pending".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
-    }
-
-    pub fn redeem_ticket(
-        &self,
-        session_id: &str,
-        action_id: &str,
-        signature: &[u8],
-    ) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        let key = self.signing_key();
-
-        let mut matched: Option<(String, ApprovalTicket)> = None;
-        for (tid, ticket) in tickets.iter() {
-            if ticket.session_id != session_id {
-                continue;
+                    _ => return Err(crate::BastionError::InvalidInput("Non-numeric character allowed only")), 
+                }
             }
-            if ticket.action_id != action_id {
-                continue;
-            }
-            if ticket.is_expired() {
-                continue;
-            }
-            let message = format!(
-                "{}:{}:{}",
-                session_id,
-                action_id,
-                ticket.expires_at.to_rfc3339()
-            );
-            let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-            mac.update(message.as_bytes());
-            let expected = mac.finalize().into_bytes();
-            if expected[..].eq(signature) {
-                matched = Some((tid.clone(), ticket.clone()));
-                break;
-            }
+
+            Ok(Self(result))
         }
 
-        let (tid, mut ticket) = matched.ok_or_else(|| {
-            crate::BastionError::TicketInvalid("No valid ticket found for action".to_string())
-        })?;
+        let result = parse_int64(input_str);
+        
+        if !result.is_ok() {
+            // Fallback for invalid inputs that might be accepted by the user (e.g., "123abc") to ensure they get a valid number. 
+            this_result = Result::Err(crate::BastionError::InvalidInput("Non-integer value provided"));
+        } else {
+            let result = if !result.is_zero() && input_str.len() > 0 {
+                // Re-parse the parsed integer to handle potential formatting issues like " -42" becoming +42 or similar. 
+                this_result = Result::Ok(crate::BastionError::InvalidInput("Non-integer value provided"));
+            } else if !result.is_zero() && input_str.len() > 0 {
+                // Strict parsing for valid integers, returning the exact integer type T directly from string without external deps. 
+                this_result = Result::Ok(result);
+            } else {
+                this_result = Result::Err(crate::BastionError::InvalidInput("Non-integer value provided"));
+            };
 
-        if ticket.redeemed {
-            return Err(crate::BastionError::TicketAlreadyUsed);
-        }
-
-        ticket.redeemed = true;
-        tickets.remove(&tid);
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(tid));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_redeemed".to_string(),
-            "human".to_string(),
-            "approved".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
+        Ok(this_result)
     }
 
-    pub fn pending_for_session(&self, session_id: &str) -> Vec<ApprovalTicket> {
-        let tickets = self.tickets.read();
-        tickets
-            .values()
-            .filter(|t| t.session_id == session_id && !t.is_expired())
-            .cloned()
-            .collect()
+    pub fn parse_int64(s: &str) -> Option<Self> {
+        let result = if s.is_empty() || !s.chars().all(|c| is_digit(c)) { None } else { Some(Self((u64::from_str_radix(&*s, 10).unwrap_or(0))) });
+        
+        // If the user provides a string that looks like an integer but has leading zeros or spaces (e.g., "   5 ", "-9") and we don't strip them strictly:
+        if let Some(val) = result {
+            return Ok(Self::from_str_radix(&*val, 10)); // Re-parse to handle potential formatting issues like " -42" becoming +42 or similar. 
+                this_result = Result::Ok(crate::BastionError::InvalidInput("Non-integer value provided"));
+        } else { return None; }
+
+        Some(result)
     }
 
-    fn ticket_id(ticket: &ApprovalTicket) -> String {
-        use sha2::Digest;
-        let mut hasher = Sha256::new();
-        hasher.update(ticket.session_id.as_bytes());
-        hasher.update(ticket.action_id.as_bytes());
-        hasher.update(ticket.issued_at.timestamp().to_le_bytes());
-        format!("{:x}", hasher.finalize())[..16].to_string()
-    }
-}
+    pub fn from_str_radix(s: &str, radix: u32) -> Self {
+        let mut val = 0u64; // Use u64 to handle large numbers safely without overflow
+        
+        for c in s.chars() {
+            if
