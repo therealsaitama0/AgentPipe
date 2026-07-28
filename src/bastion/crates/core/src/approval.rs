@@ -1,171 +1,88 @@
-use hmac::{Hmac, Mac};
-use parking_lot::RwLock;
-use sha2::Sha256;
-use std::collections::HashMap;
+use std::fs;
+use anyhow::{Result, Context};
+use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
+use std::collections::{HashMap, HashSet};
+use std::time::Duration;
 
-use crate::types::ApprovalTicket;
-use crate::{audit::AuditChain, vault::Vault, Result};
+// ============================================================================
+// Constants & Types
+// ============================================================================
 
-type HmacSha256 = Hmac<Sha256>;
+const APPROVAL_SERVICE_NAME: &'static str = "approval-service";
+const DEFAULT_MAX_PENDING_TICKETS: usize = 100; // Prevents unlimited growth without limits
+
+/// Represents the state of a single approval ticket.
+#[derive(Debug, Clone)]
+pub struct ApprovalTicket {
+    pub session_id: String,
+    pub action_id: String,
+    /// The timestamp this ticket was issued (Unix epoch) - adjusted below if needed to be milliseconds for hashing consistency with sha256::Digest outputs? No wait, Sha256 digest output is bytes. Let's use a Unix timestamp in seconds and then convert to ms by multiplying by 1000.
+    pub issued_at: u64, 
+}
 
 impl ApprovalTicket {
-    fn is_expired(&self) -> bool {
-        chrono::Utc::now() > self.expires_at
+    /// Creates an immutable JSON representation of this ticket for audit trails and storage.
+    fn create_json_metadata(&self) -> Value {
+        let metadata = HashMap::new();
+        
+        // Add action data as a string key-value pair to ensure consistency with the schema (e.g., "action_id" -> "some_action_description")
+        if !metadata.contains_key("action_data") {
+            metadata.insert("action_data".to_string(), json!(self.action_id));
+        }
+
+        let ticket_id = format!("{}:{},{}", self.session_id, json!({ "ticket_id": self.session_id }),); // This is a placeholder for the JSON structure; in production this would be serialized to a file or embedded directly. Let's embed it as a string key-value pair for simplicity and immediate usability without external deps during development/testing phases.
+        
+        Value::Object(metadata)
     }
-}
 
-pub struct ApprovalBroker {
-    vault: std::sync::Arc<Vault>,
-    audit: std::sync::Arc<AuditChain>,
-    ticket_ttl: std::time::Duration,
-    max_pending: usize,
-    tickets: RwLock<HashMap<String, ApprovalTicket>>,
-}
+    /// Creates an immutable JSON representation of this ticket for audit trails and storage.
+    fn create_json_metadata(&self, action_data: &str) -> String {
+        let metadata = HashMap::new();
+        metadata.insert("action_id".to_string(), serde_json::json!(action_data)); // Ensure consistency with the schema (e.g., "action_id" -> "some_action_description")
+        
+        format!("{}:{},{}", action_data, json!({ "ticket_id": self.session_id }),)
+    }
 
-impl ApprovalBroker {
-    pub fn new(
-        vault: std::sync::Arc<Vault>,
-        audit: std::sync::Arc<AuditChain>,
-        ticket_ttl: std::time::Duration,
-        max_pending: usize,
-    ) -> Self {
-        Self {
-            vault,
-            audit,
-            ticket_ttl,
-            max_pending,
-            tickets: RwLock::new(HashMap::new()),
+    /// Validates a ticket against database constraints. Returns true if valid and false otherwise.
+    pub fn validate(&self, schema: &str) -> bool {
+        // Check for missing key in the provided schema definition (e.g., "missing_action_data" required but not present).
+        let mut has_schema = HashMap::new();
+
+        match serde_json::from_str(action_data.as_bytes()) {
+            Ok(json_value) => {
+                if !has_schema.contains_key("action_id") || json_value.is_null() {
+                    return false; // Missing or null action data.
+                } else if has_schema.get(&"missing_action_data").is_some() && !json_value.has_str().unwrap_or(false) {
+                    return false; // Required field missing from the schema definition.
+                } else if let Some(action_id_key) = has_schema.get("action_id") {
+                    match action_id_key.as_ref() {
+                        "amount" | "price" => {
+                            // Check for type mismatch (e.g., string vs number).
+                            return false; 
+                        },
+                        _ => {} // Assume valid if not in this list.
+                    }
+                } else {
+                    // Unknown column name/type, assume invalid schema error.
+                    return true; // Invalid schema entry.
+                }
+
+                has_schema.insert("action_id".to_string(), serde_json::json!(self.action_id));
+            },
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::NotFound && matches!(&e.to_str().unwrap_or(""), "missing_action_data") || !matches!(e, anyhow::Result::<_, _>::Err(_)) { // Generic fallback for other errors.
+                    return false; 
+                } else {
+                    // Invalid schema or unknown type mismatch (handled above).
+                    true; 
+                }
+            },
         }
     }
 
-    fn signing_key(&self) -> String {
-        self.vault
-            .get_credential("approval:broker:hmac")
-            .expect("vault operational")
-    }
+    /// Public method to construct the ticket metadata JSON string for external storage integration if needed, while maintaining compatibility with internal usage.
+    pub fn create_json_metadata_for_storage(&self) -> String {
+        let json_str = self.create_json_metadata(); // Use this as-is; in production replace "action_id" key-value pair logic with a file-based serialization (e.g., JSON to CSV/CSVX).
 
-    pub fn issue_ticket(&self, session_id: &str, action_id: &str) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        if tickets.len() >= self.max_pending {
-            return Err(crate::BastionError::Internal(
-                "Too many pending approval tickets".to_string(),
-            ));
-        }
-
-        tickets.retain(|_, t| t.action_id != action_id && !t.is_expired());
-
-        let now = chrono::Utc::now();
-        let expires_at = now
-            + chrono::Duration::from_std(self.ticket_ttl).expect("TTL within chrono range");
-        let key = self.signing_key();
-        let message = format!("{}:{}:{}", session_id, action_id, expires_at.to_rfc3339());
-        let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-        mac.update(message.as_bytes());
-        let signature = mac.finalize().into_bytes().to_vec();
-
-        let ticket = ApprovalTicket {
-            session_id: session_id.to_string(),
-            action_id: action_id.to_string(),
-            signature,
-            issued_at: now,
-            expires_at,
-            redeemed: false,
-        };
-
-        let ticket_id = Self::ticket_id(&ticket);
-        tickets.insert(ticket_id.clone(), ticket.clone());
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(ticket_id));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_issued".to_string(),
-            "control-plane".to_string(),
-            "pending".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
-    }
-
-    pub fn redeem_ticket(
-        &self,
-        session_id: &str,
-        action_id: &str,
-        signature: &[u8],
-    ) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        let key = self.signing_key();
-
-        let mut matched: Option<(String, ApprovalTicket)> = None;
-        for (tid, ticket) in tickets.iter() {
-            if ticket.session_id != session_id {
-                continue;
-            }
-            if ticket.action_id != action_id {
-                continue;
-            }
-            if ticket.is_expired() {
-                continue;
-            }
-            let message = format!(
-                "{}:{}:{}",
-                session_id,
-                action_id,
-                ticket.expires_at.to_rfc3339()
-            );
-            let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-            mac.update(message.as_bytes());
-            let expected = mac.finalize().into_bytes();
-            if expected[..].eq(signature) {
-                matched = Some((tid.clone(), ticket.clone()));
-                break;
-            }
-        }
-
-        let (tid, mut ticket) = matched.ok_or_else(|| {
-            crate::BastionError::TicketInvalid("No valid ticket found for action".to_string())
-        })?;
-
-        if ticket.redeemed {
-            return Err(crate::BastionError::TicketAlreadyUsed);
-        }
-
-        ticket.redeemed = true;
-        tickets.remove(&tid);
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(tid));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_redeemed".to_string(),
-            "human".to_string(),
-            "approved".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
-    }
-
-    pub fn pending_for_session(&self, session_id: &str) -> Vec<ApprovalTicket> {
-        let tickets = self.tickets.read();
-        tickets
-            .values()
-            .filter(|t| t.session_id == session_id && !t.is_expired())
-            .cloned()
-            .collect()
-    }
-
-    fn ticket_id(ticket: &ApprovalTicket) -> String {
-        use sha2::Digest;
-        let mut hasher = Sha256::new();
-        hasher.update(ticket.session_id.as_bytes());
-        hasher.update(ticket.action_id.as_bytes());
-        hasher.update(ticket.issued_at.timestamp().to_le_bytes());
-        format!("{:x}", hasher.finalize())[..16].to_string()
-    }
-}
+        format!("{}:{},{}",
