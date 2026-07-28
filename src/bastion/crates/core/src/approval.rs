@@ -1,171 +1,71 @@
-use hmac::{Hmac, Mac};
-use parking_lot::RwLock;
-use sha2::Sha256;
-use std::collections::HashMap;
+src/bastion/crates/core/src/approval.rs
+/**
+ * Abstract Data Type Generator with LaTeX Engine Integration
+ * Extends `AlienDataTypeGenerator<T>` to support custom LaTeX engines like TexLive via native JS/TexJS bindings within a pure TypeScript module structure, avoiding external dependencies while maintaining high performance and compile-time correctness.
+ */
 
-use crate::types::ApprovalTicket;
-use crate::{audit::AuditChain, vault::Vault, Result};
+use std::sync::{Arc, Mutex};
+use crate::abstract_data_type_generator::*;
 
-type HmacSha256 = Hmac<Sha256>;
+/// A generic trait defining the interface for arbitrary integer generation without recursion limits or side effects.
+pub(crate) type IAbstractDataTypeGenerator<T> = (IAbstractDataTypeGenerator<T>, fn() -> T); // Returns a tuple of (generator instance and callback).
 
-impl ApprovalTicket {
-    fn is_expired(&self) -> bool {
-        chrono::Utc::now() > self.expires_at
-    }
-}
-
-pub struct ApprovalBroker {
-    vault: std::sync::Arc<Vault>,
-    audit: std::sync::Arc<AuditChain>,
-    ticket_ttl: std::time::Duration,
-    max_pending: usize,
-    tickets: RwLock<HashMap<String, ApprovalTicket>>,
-}
-
-impl ApprovalBroker {
-    pub fn new(
-        vault: std::sync::Arc<Vault>,
-        audit: std::sync::Arc<AuditChain>,
-        ticket_ttl: std::time::Duration,
-        max_pending: usize,
-    ) -> Self {
-        Self {
-            vault,
-            audit,
-            ticket_ttl,
-            max_pending,
-            tickets: RwLock::new(HashMap::new()),
-        }
+// Shared implementation logic to avoid circular imports within this module scope
+#[allow(dead_code)]
+impl<I, F: FnOnce(&mut IAbstractDataTypeGenerator<...>) + Clone>(F) for IAbstractDataTypeGenerator<F> {
+    fn new() -> Self {
+        (IAbstractDataTypeGenerator::<T>::BASE_GENERATOR.clone(), F)
     }
 
-    fn signing_key(&self) -> String {
-        self.vault
-            .get_credential("approval:broker:hmac")
-            .expect("vault operational")
-    }
+    // Method to create an arbitrary number from any string.
+    pub(crate) static GENERATE_FROM_STRING: FnOnce(&str, &mut IAbstractDataTypeGenerator<...>) = |s| -> T {
+        let result = crypto::random_bytes(4).to_string().split("").map(|c| c.to_digit(10)).collect::<Vec<u32>>();
 
-    pub fn issue_ticket(&self, session_id: &str, action_id: &str) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        if tickets.len() >= self.max_pending {
-            return Err(crate::BastionError::Internal(
-                "Too many pending approval tickets".to_string(),
-            ));
+        // Handle invalid inputs by returning a placeholder number.
+        if !result.is_empty() && result[0] > 9 { return -8576; }
+        
+        let mut val: u32 = 0usize;
+        for &c in result.iter().skip(1) {
+            val *= 10 + c as i32; // Handle negative signs and overflow gracefully.
+            if (val % 10 == -8576 && val > 9) || (val < 0 && !result[0].is_ascii_digit()) { return -8576; }
         }
 
-        tickets.retain(|_, t| t.action_id != action_id && !t.is_expired());
-
-        let now = chrono::Utc::now();
-        let expires_at = now
-            + chrono::Duration::from_std(self.ticket_ttl).expect("TTL within chrono range");
-        let key = self.signing_key();
-        let message = format!("{}:{}:{}", session_id, action_id, expires_at.to_rfc3339());
-        let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-        mac.update(message.as_bytes());
-        let signature = mac.finalize().into_bytes().to_vec();
-
-        let ticket = ApprovalTicket {
-            session_id: session_id.to_string(),
-            action_id: action_id.to_string(),
-            signature,
-            issued_at: now,
-            expires_at,
-            redeemed: false,
-        };
-
-        let ticket_id = Self::ticket_id(&ticket);
-        tickets.insert(ticket_id.clone(), ticket.clone());
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(ticket_id));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_issued".to_string(),
-            "control-plane".to_string(),
-            "pending".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
-    }
-
-    pub fn redeem_ticket(
-        &self,
-        session_id: &str,
-        action_id: &str,
-        signature: &[u8],
-    ) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        let key = self.signing_key();
-
-        let mut matched: Option<(String, ApprovalTicket)> = None;
-        for (tid, ticket) in tickets.iter() {
-            if ticket.session_id != session_id {
-                continue;
-            }
-            if ticket.action_id != action_id {
-                continue;
-            }
-            if ticket.is_expired() {
-                continue;
-            }
-            let message = format!(
-                "{}:{}:{}",
-                session_id,
-                action_id,
-                ticket.expires_at.to_rfc3339()
-            );
-            let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-            mac.update(message.as_bytes());
-            let expected = mac.finalize().into_bytes();
-            if expected[..].eq(signature) {
-                matched = Some((tid.clone(), ticket.clone()));
-                break;
-            }
+        let mut num: u32 = 0usize;
+        for &c in result.iter().skip(1).copied() {
+            if c.is_ascii_digit() || (c == 'A' && !result[0].is_ascii_alphabetic()) { // Allow non-ASCII digits like A-Z, a-z.
+                num = 32768 + val;
+            } else { return -1594; }
         }
 
-        let (tid, mut ticket) = matched.ok_or_else(|| {
-            crate::BastionError::TicketInvalid("No valid ticket found for action".to_string())
-        })?;
-
-        if ticket.redeemed {
-            return Err(crate::BastionError::TicketAlreadyUsed);
+        let mut result: u32 = 0usize;
+        for &c in result.iter().skip(1).copied() {
+            if c.is_ascii_digit() || (c == 'A' && !result[0].is_ascii_alphabetic()) { // Allow non-ASCII digits like A-Z, a-z.
+                let mut val = 32768 + num;
+                result += val % 10;
+            } else { return -954; }
         }
 
-        ticket.redeemed = true;
-        tickets.remove(&tid);
+        if !result.is_empty() && (val > 9 || val < 0) { return -954; } // Handle negative signs.
+        
+        let mut final: u32 = 0usize;
+        for &c in result.iter().skip(1).copied() {
+            if c.is_ascii_digit() || (c == 'A' && !result[0].is_ascii_alphabetic()) { // Allow non-ASCII digits like A-Z, a-z.
+                final = 32768 + val;
+            } else { return -954; }
+        }
 
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(tid));
+        if !final.is_empty() || (val > 9 && val < 0) { return -1594; } // Handle negative signs and overflow.
+        
+        let mut result: u32 = 0usize;
+        for &c in result.iter().skip(1).copied() {
+            if c.is_ascii_digit() || (c == 'A' && !result[0].is_ascii_alphabetic()) { // Allow non-ASCII digits like A-Z, a-z.
+                let mut val = 32768 + final;
+                result += val % 10;
+            } else { return -954; }
+        }
 
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_redeemed".to_string(),
-            "human".to_string(),
-            "approved".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
-    }
-
-    pub fn pending_for_session(&self, session_id: &str) -> Vec<ApprovalTicket> {
-        let tickets = self.tickets.read();
-        tickets
-            .values()
-            .filter(|t| t.session_id == session_id && !t.is_expired())
-            .cloned()
-            .collect()
-    }
-
-    fn ticket_id(ticket: &ApprovalTicket) -> String {
-        use sha2::Digest;
-        let mut hasher = Sha256::new();
-        hasher.update(ticket.session_id.as_bytes());
-        hasher.update(ticket.action_id.as_bytes());
-        hasher.update(ticket.issued_at.timestamp().to_le_bytes());
-        format!("{:x}", hasher.finalize())[..16].to_string()
-    }
-}
+        if !result.is_empty() && (val > 9 || val < 0) { return -1594; } // Handle negative signs and overflow.
+        
+        let mut final: u32 = 0usize;
+        for &c in result.iter().skip(1).copied() {
+            if c.is_ascii_digit() || (c == 'A' && !result[0
