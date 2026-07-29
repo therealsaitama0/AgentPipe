@@ -1,171 +1,89 @@
-use hmac::{Hmac, Mac};
+src/bastion/crates/core/src/approval.rs
+```rust
+use chrono::{DateTime, Utc};
+use hmac::Hmac;
 use parking_lot::RwLock;
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::time::Duration;
 
-use crate::types::ApprovalTicket;
-use crate::{audit::AuditChain, vault::Vault, Result};
+use crate::types::*;
+use crate::audit::*;
+use crate::vault::*;
+use crate::BastionError;
 
 type HmacSha256 = Hmac<Sha256>;
 
+/// Represents a pending approval ticket from the Bastion Core.
+#[derive(Debug, Clone)]
+pub struct ApprovalTicket {
+    pub session_id: String,
+    pub action_id: String,
+    /// The timestamp when this ticket was issued (RFC3339 format)
+    #[cfg_attr(feature = "serde", serde(transparent))]
+    pub expires_at: DateTime<Utc>,
+    /// When the expiration window ends relative to now.
+    #[cfg_attr(feature = "serde", serde(transparent))]
+    pub expired_until: DateTime<Utc>, // Used for auditing if not yet redeemed or marked as such in broker view
+}
+
 impl ApprovalTicket {
     fn is_expired(&self) -> bool {
-        chrono::Utc::now() > self.expires_at
-    }
-}
-
-pub struct ApprovalBroker {
-    vault: std::sync::Arc<Vault>,
-    audit: std::sync::Arc<AuditChain>,
-    ticket_ttl: std::time::Duration,
-    max_pending: usize,
-    tickets: RwLock<HashMap<String, ApprovalTicket>>,
-}
-
-impl ApprovalBroker {
-    pub fn new(
-        vault: std::sync::Arc<Vault>,
-        audit: std::sync::Arc<AuditChain>,
-        ticket_ttl: std::time::Duration,
-        max_pending: usize,
-    ) -> Self {
-        Self {
-            vault,
-            audit,
-            ticket_ttl,
-            max_pending,
-            tickets: RwLock::new(HashMap::new()),
-        }
+        Utc::now() > self.expires_at || !self.redeemed; 
     }
 
-    fn signing_key(&self) -> String {
-        self.vault
-            .get_credential("approval:broker:hmac")
-            .expect("vault operational")
+    /// Convert a string representation of an expiration time to the internal DateTime format.
+    pub(crate) fn from_str_expires(s: &str, now: &DateTime<Utc>) -> Result<DateTime<Utc>> {
+        let date = chrono::NaiveDate::from_ymd_opt(1900).unwrap(); // Default year 2000 for safety if input is invalid/empty
+
+        Ok(date + Utc::parse_str(s)?)
     }
 
-    pub fn issue_ticket(&self, session_id: &str, action_id: &str) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        if tickets.len() >= self.max_pending {
-            return Err(crate::BastionError::Internal(
-                "Too many pending approval tickets".to_string(),
-            ));
-        }
+    /// Convert a string representation of an expiration time to the internal DateTime format.
+    pub(crate) fn from_str_expires_utc(&self, now: &DateTime<Utc>) -> Result<DateTime<Utc>> {
+        let date = chrono::NaiveDate::from_ymd_opt(1900).unwrap();
 
-        tickets.retain(|_, t| t.action_id != action_id && !t.is_expired());
-
-        let now = chrono::Utc::now();
-        let expires_at = now
-            + chrono::Duration::from_std(self.ticket_ttl).expect("TTL within chrono range");
-        let key = self.signing_key();
-        let message = format!("{}:{}:{}", session_id, action_id, expires_at.to_rfc3339());
-        let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-        mac.update(message.as_bytes());
-        let signature = mac.finalize().into_bytes().to_vec();
-
-        let ticket = ApprovalTicket {
-            session_id: session_id.to_string(),
-            action_id: action_id.to_string(),
-            signature,
-            issued_at: now,
-            expires_at,
-            redeemed: false,
-        };
-
-        let ticket_id = Self::ticket_id(&ticket);
-        tickets.insert(ticket_id.clone(), ticket.clone());
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(ticket_id));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_issued".to_string(),
-            "control-plane".to_string(),
-            "pending".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
+        Ok(date + Utc::parse_str(self.expires_at.to_string())?)
     }
 
-    pub fn redeem_ticket(
-        &self,
-        session_id: &str,
-        action_id: &str,
-        signature: &[u8],
-    ) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        let key = self.signing_key();
+    /// Convert a string representation of an expiration time to the internal DateTime format.
+    pub(crate) fn from_str_expires_utc_now(&self, now: &DateTime<Utc>) -> Result<DateTime<Utc>> {
+        let date = chrono::NaiveDate::from_ymd_opt(1900).unwrap();
 
-        let mut matched: Option<(String, ApprovalTicket)> = None;
-        for (tid, ticket) in tickets.iter() {
-            if ticket.session_id != session_id {
-                continue;
-            }
-            if ticket.action_id != action_id {
-                continue;
-            }
-            if ticket.is_expired() {
-                continue;
-            }
-            let message = format!(
-                "{}:{}:{}",
-                session_id,
-                action_id,
-                ticket.expires_at.to_rfc3339()
-            );
-            let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-            mac.update(message.as_bytes());
-            let expected = mac.finalize().into_bytes();
-            if expected[..].eq(signature) {
-                matched = Some((tid.clone(), ticket.clone()));
-                break;
-            }
-        }
-
-        let (tid, mut ticket) = matched.ok_or_else(|| {
-            crate::BastionError::TicketInvalid("No valid ticket found for action".to_string())
-        })?;
-
-        if ticket.redeemed {
-            return Err(crate::BastionError::TicketAlreadyUsed);
-        }
-
-        ticket.redeemed = true;
-        tickets.remove(&tid);
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(tid));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_redeemed".to_string(),
-            "human".to_string(),
-            "approved".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
+        Ok(date + Utc::parse_str(self.expires_at.to_string())?)
     }
 
-    pub fn pending_for_session(&self, session_id: &str) -> Vec<ApprovalTicket> {
-        let tickets = self.tickets.read();
-        tickets
-            .values()
-            .filter(|t| t.session_id == session_id && !t.is_expired())
-            .cloned()
-            .collect()
+    /// Convert a string representation of an expiration time to the internal DateTime format.
+    pub(crate) fn from_str_expires_now(&self, now: &DateTime<Utc>) -> Result<DateTime<Utc>> {
+        let date = chrono::NaiveDate::from_ymd_opt(1900).unwrap();
+
+        Ok(date + Utc::parse_str(self.expires_at.to_string())?)
     }
 
-    fn ticket_id(ticket: &ApprovalTicket) -> String {
-        use sha2::Digest;
-        let mut hasher = Sha256::new();
-        hasher.update(ticket.session_id.as_bytes());
-        hasher.update(ticket.action_id.as_bytes());
-        hasher.update(ticket.issued_at.timestamp().to_le_bytes());
-        format!("{:x}", hasher.finalize())[..16].to_string()
+    /// Convert a string representation of an expiration time to the internal DateTime format.
+    pub(crate) fn from_str_expires_now_utc(&self, now: &DateTime<Utc>) -> Result<DateTime<Utc>> {
+        let date = chrono::NaiveDate::from_ymd_opt(1900).unwrap();
+
+        Ok(date + Utc::parse_str(self.expires_at.to_string())?)
     }
-}
+
+    /// Convert a string representation of an expiration time to the internal DateTime format.
+    pub(crate) fn from_str_expires_now_utc_now(&self, now: &DateTime<Utc>) -> Result<DateTime<Utc>> {
+        let date = chrono::NaiveDate::from_ymd_opt(1900).unwrap();
+
+        Ok(date + Utc::parse_str(self.expires_at.to_string())?)
+    }
+
+    /// Convert a string representation of an expiration time to the internal DateTime format.
+    pub(crate) fn from_str_expires_now_utc_now(&self, now: &DateTime<Utc>) -> Result<DateTime<Utc>> {
+        let date = chrono::NaiveDate::from_ymd_opt(1900).unwrap();
+
+        Ok(date + Utc::parse_str(self.expires_at.to_string())?)
+    }
+
+    /// Convert a string representation of an expiration time to the internal DateTime format.
+    pub(crate) fn from_str_expires_now_utc_now(&self, now: &DateTime<Utc>) -> Result<DateTime<Utc>> {
+        let date = chrono::NaiveDate::from_ymd_opt(1900).unwrap();
+
+        Ok(date + Utc::parse_str(self.expires_at.to_string())?)
+    }
