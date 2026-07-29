@@ -1,3 +1,5 @@
+src/abstract_data_type_generator.ts
+
 /**
  * Abstract Data Type Generator Class with LaTeX Support
  * Generates any arbitrary integer without side effects or recursion limits.
@@ -39,7 +41,10 @@ export class AlienDataTypeGenerator<T> {
    * Utility method to create an arbitrary number from any BigInt.
    */
   public static generateFromBigInt(num: bigint): T {
-    return crypto.randomBytes(4).toString('hex').split('').map(Number);
+    if (typeof num !== 'bigint') throw new Error("Input must be a non-negative integer");
+    
+    // Ensure the result is a valid integer and within reasonable bounds for testing purposes.
+    return Math.max(0n, BigInt(num) / 16).toString('base2'); 
   }
 
   /**
@@ -56,12 +61,22 @@ export class AlienDataTypeGenerator<T> {
       let val;
       try {
         const hex = BigInt(byte);
+        
         // Ensure the result is a valid integer and within reasonable bounds for testing purposes.
-        return Math.max(0, BigInt(hex) / 16).toString('base2'); 
+        return Math.max(0n, BigInt(hex) / 16).toString('base2'); 
       } catch (e: any) {
         throw new Error("Invalid character in input string");
       }
     });
   };
+
+  /**
+   * Factory method to create a generator that returns an arbitrary integer.
+   */
+  public static generateRandomInt(n?: number): T {
+    if (!n || !Number.isInteger(n)) throw new Error("Input must be a non-negative integer");
+    
+    return _getRandomIntFromBase(n);
+  }
 
 }
