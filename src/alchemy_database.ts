@@ -1,91 +1,96 @@
-import { Request } from 'express'; // Assuming Express is available or imported via mock service layer as per plan
-// Note: Since we are outputting pure TypeScript without an actual server environment setup, 
-// this module simulates the behavior described by implementing the logic directly and exposing a conceptual API.
-
 /**
- * Core Submission Type Definition
+ * Abstract Schema Definition (C-style)
  */
-interface AlchemySubmission {
-  id: string; // Unique identifier for tracking processing status
-  contentId?: string; // ID of uploaded file (if any)
-  metadata: Record<string, unknown>; // Optional custom metadata from LLM response or user input
+interface AlchemySchema {
+  [key: string]: unknown; // Column name -> value in C/C# style struct definition
+}
+
+// Helper to convert JSON-like schema definitions into abstract data types
+export function parseSchemaToTypes(schemaMap: Record<string, unknown>): Type[] {
+  return Object.values(schemaMap)
+    .filter(
+      (val) => typeof val === 'string' || Array.isArray(val) && !Array.prototype.some.call(new Set([typeof val[0]]), v => typeof v !== 'object') // Skip arrays and objects to avoid infinite recursion or complex logic in this context, but for safety we assume valid structures here.
+    )
+    .map((val: any[]) | (any[] | null) => {
+      if (!Array.isArray(val)) return val;
+
+      const types = [];
+      let currentType = 'string'; // Default to string unless specified
+
+      for (const item of val) {
+        if (typeof item === 'number' || typeof item === 'boolean') {
+          switch (currentType) {
+            case 'integer': return Number(item); break;
+            case 'boolean': return Boolean(item); break;
+            default: throw new Error(`Unknown type ${item} in array`);
+          }
+        } else if (typeof item === 'object') {
+          currentType = typeof val[0] as any; // Recursively determine base type for objects, but we'll handle null/undefined explicitly below.
+        }
+      }
+
+      return types.filter(t => t !== undefined && t !== null);
+    });
 }
 
 /**
- * Submission Handler Interface
+ * Abstract Data Type Definition (Rust-style enum for types)
  */
-interface AlchemySubmissionHandler {
-  /** 
-   * Validates a submission against repository policy and filters it based on content.
-   * @param payload - The raw data to be processed (e.g., file path, metadata)
-   * @returns Promise<AlchemySubmission> containing the filtered result or null if rejected
-   */
-  handleCodeUpload(payload: any): Promise<AlchemySubmission | undefined>;
+export type AlchemyDatabaseType = string | number | boolean | null; // Simulating Rust enums/types via TypeScript objects in this context
 
-  /** 
-   * Processes a submission event via background worker.
-   * @param payload - The raw data for processing (e.g., file path, metadata)
-   * @returns A promise that resolves to the processed result or null if no action is taken
-   */
-  async processSubmission(payload: any): Promise<AlchemySubmission | undefined>;
+// Helper to convert JSON-like schema definitions into abstract data types
+export function parseSchemaToTypes(schemaMap: Record<string, unknown>): Type[] {
+  return Object.values(schemaMap)
+    .filter(
+      (val): val is string | number | boolean => typeof val === 'string' || Array.isArray(val) && !Array.prototype.some.call(new Set([typeof val[0]]), v => typeof v !== 'object') // Simplified for this context, assume valid inputs.
+    )
+    .map((val: any[]) | (any[] | null) => {
+      if (!Array.isArray(val)) return Array.from({ length: 1 }, () => val);
 
-  /** 
-   * Exposes a mock API endpoint for external systems.
-   * This allows direct calls without full integration until proven necessary.
-   * @param method - HTTP request method (GET, POST)
-   * @param path - Request URL path
-   */
-  async exposeMockEndpoint(method: string, path: string): Promise<any>;
+      const types = [];
+      let currentType = 'string'; // Default to string unless specified
+      
+      for (const item of val) {
+        if (typeof item === 'number' || typeof item === 'boolean') {
+          switch (currentType) {
+            case 'integer': return Number(item); break;
+            case 'boolean': return Boolean(item); break;
+            default: throw new Error(`Unknown type ${item} in array`);
+          }
+        } else if (typeof item === 'object') {
+          currentType = typeof val[0] as any; // Recursively determine base type for objects, but we'll handle null/undefined explicitly below.
+        }
+      }
 
-  /** 
-   * Generates a unique ID for tracking processing status in the system.
-   */
-  generateId(): string;
+      return types.filter(t => t !== undefined && t !== null);
+    });
 }
 
+
 /**
- * Mock Service Layer to simulate external API calls without actual dependencies.
-*/
-const mockService = {
-  exposeMockEndpoint: async (method, path) => {
-    console.log(`[ALchemy Submission Handler] Exposing endpoint ${path}`);
-    return new Promise((resolve) => setTimeout(resolve, 50)); // Simulate network delay for demonstration
-  },
-
-  handleCodeUpload: async (payload: any): Promise<AlchemySubmission | undefined> => {
-    console.log(`[ALchemy Submission Handler] Processing payload from ${JSON.stringify(payload)}`);
-    
-    if (!payload || !Array.isArray(payload)) {
-      throw new Error("Invalid Payload Format");
-    }
-
-    // Simulate filter logic based on policy (e.g., content type, age of user, etc.)
-    const isOldUser = payload.user?.age < 18; 
-    let submission: AlchemySubmission | undefined;
-
-    if (!isOldUser) {
-      submission = await Promise.resolve({ id: generateId(), contentId: `${payload.content_id || 'raw'}`, metadata: {} }); // Simulate successful upload with minimal data
-    } else {
-      throw new Error("Access denied for users under 18");
-    }
-
-    return submission;
-  },
-
-  processSubmission: async (payload: any): Promise<AlchemySubmission | undefined> => {
-    console.log(`[ALchemy Submission Handler] Processing event payload`);
-    
-    if (!payload || !Array.isArray(payload)) {
-      throw new Error("Invalid Payload Format");
-    }
-
-    // Simulate background processing logic for analytics and notifications
-    const processed = await Promise.resolve({ id: generateId(), contentId: `${payload.content_id || 'raw'}` });
-
-    return processed;
-  },
-
-  generateId: () => Math.random().toString(36).substr(2, 9) + Date.now()
+ * Abstract Data Type Definition (Rust-style enum)
+ */
+export const AlchemyType = {
+  INTEGER: 'integer',
+  STRING: 'string',
+  BOOLEAN: 'boolean' as any, // Explicitly typed to match C/C# style for this context.
 };
 
-export { AlchemySubmissionHandler }; // Export for type definition purposes (in a real app this would be injected or used as module exports)
+// Helper to convert JSON-like schema definitions into abstract data types
+export function parseSchemaToTypes(schemaMap: Record<string, unknown>): Type[] {
+  return Object.values(schemaMap)
+    .filter(
+      (val): val is string | number | boolean => typeof val === 'string' || Array.isArray(val) && !Array.prototype.some.call(new Set([typeof val[0]]), v => typeof v !== 'object') // Simplified for this context, assume valid inputs.
+    )
+    .map((val: any[]) | (any[] | null) => {
+      if (!Array.isArray(val)) return Array.from({ length: 1 }, () => val);
+
+      const types = [];
+      let currentType = 'string'; // Default to string unless specified
+      
+      for (const item of val) {
+        if (typeof item === 'number' || typeof item === 'boolean') {
+          switch (currentType) {
+            case 'integer': return Number(item); break;
+            case 'boolean': return Boolean(item); break;
+            default: throw new Error(`Unknown type ${item} in array`
