@@ -1,171 +1,126 @@
-use hmac::{Hmac, Mac};
-use parking_lot::RwLock;
-use sha2::Sha256;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+use std::time::Duration;
+use sha2::{Digest, Sha256};
 
-use crate::types::ApprovalTicket;
-use crate::{audit::AuditChain, vault::Vault, Result};
+// ============================================================================
+// Imports & Constants for Approval Engine Integration
+// ============================================================================
 
-type HmacSha256 = Hmac<Sha256>;
+pub const MAX_PENDING_APPROVALS: usize = 10_000; // Cap to prevent exhaustion in test environments
+const APPROVAL_POLICY_KEY: &'static str = "approval.policy";
+const SESSION_ID_PREFIXES: &[&str] = &[
+    "system_admin",
+    "user_manager",
+    "data_processor",
+    "financial_controller",
+];
 
-impl ApprovalTicket {
-    fn is_expired(&self) -> bool {
-        chrono::Utc::now() > self.expires_at
+// ============================================================================
+// Core Policies & Criteria Definitions (Immutable State)
+// ============================================================================
+
+#[derive(Debug, Clone)]
+pub struct ApprovalPolicy {
+    pub policy_id: String, // Unique identifier for the rule set
+    pub criteria_set: Vec<String>, // List of allowed actions per category or severity level
+    
+    /// Severity levels mapped to thresholds. Higher = stricter (e.g., 0=Low, 9=Critical).
+    #[allow(dead_code)]
+    pub policy_severity_levels: HashMap<i32, String>, 
+    
+    /// Specific rules for each action type within the criteria set.
+    #[allow(dead_code)]
+    pub specific_rules: Vec<RuleDefinition>,
+
+    // Metadata for audit trail purposes (immutable during runtime)
+    pub created_at: DateTime, 
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum SeverityLevel {
+    Low = 0,
+    Medium = 1,
+    High = 2,
+    Critical = 3,
+}
+
+impl std::fmt::Display for ApprovalPolicy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Approval Policy {}", self.policy_id)
     }
 }
 
-pub struct ApprovalBroker {
-    vault: std::sync::Arc<Vault>,
-    audit: std::sync::Arc<AuditChain>,
-    ticket_ttl: std::time::Duration,
-    max_pending: usize,
-    tickets: RwLock<HashMap<String, ApprovalTicket>>,
+#[derive(Debug)]
+pub struct RuleDefinition {
+    pub action_type: String, // e.g., "approve_user", "refund_fraud"
+    #[allow(dead_code)]
+    pub severity_min: SeverityLevel,
+    #[allow(dead_code)]
+    pub max_severity_max: Option<SeverityLevel>, 
+    pub description: String,
 }
 
-impl ApprovalBroker {
-    pub fn new(
-        vault: std::sync::Arc<Vault>,
-        audit: std::sync::Arc<AuditChain>,
-        ticket_ttl: std::time::Duration,
-        max_pending: usize,
-    ) -> Self {
-        Self {
-            vault,
-            audit,
-            ticket_ttl,
-            max_pending,
-            tickets: RwLock::new(HashMap::new()),
-        }
-    }
+#[derive(Debug, Clone)]
+pub struct ApprovalTicket {
+    /// The action ID associated with this approval request.
+    pub action_id: String,
+    
+    // Session identification within the broker context (for audit tracing)
+    #[allow(dead_code)]
+    pub session_id: Option<String>, 
+    pub created_at: DateTime,
 
-    fn signing_key(&self) -> String {
-        self.vault
-            .get_credential("approval:broker:hmac")
-            .expect("vault operational")
-    }
+    // Security metadata for verification chains
+    #[allow(dead_code)]
+    pub signature_hash: [u8; 32], 
 
-    pub fn issue_ticket(&self, session_id: &str, action_id: &str) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        if tickets.len() >= self.max_pending {
-            return Err(crate::BastionError::Internal(
-                "Too many pending approval tickets".to_string(),
-            ));
-        }
+    /// The timestamp when this request was formally issued. Used in future revocation checks.
+    pub issue_time: DateTime,
+    
+    /// When does the approval become valid? (Expiration)
+    // Note: In a real system, expiration is handled by time-based TTLs or explicit timeouts.
+    #[allow(dead_code)]
+    pub expires_at: DateTime,
 
-        tickets.retain(|_, t| t.action_id != action_id && !t.is_expired());
+    /// Boolean flag indicating whether this ticket has been redeemed (used for audit logging).
+    pub is_redeemed: bool = false; 
+}
 
-        let now = chrono::Utc::now();
-        let expires_at = now
-            + chrono::Duration::from_std(self.ticket_ttl).expect("TTL within chrono range");
-        let key = self.signing_key();
-        let message = format!("{}:{}:{}", session_id, action_id, expires_at.to_rfc3339());
-        let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-        mac.update(message.as_bytes());
-        let signature = mac.finalize().into_bytes().to_vec();
+// ============================================================================
+// Data Structures & Helpers within the Crate
+// ============================================================================
 
-        let ticket = ApprovalTicket {
-            session_id: session_id.to_string(),
-            action_id: action_id.to_string(),
-            signature,
-            issued_at: now,
-            expires_at,
-            redeemed: false,
-        };
+use chrono::{DateTime, Duration};
 
-        let ticket_id = Self::ticket_id(&ticket);
-        tickets.insert(ticket_id.clone(), ticket.clone());
+pub struct ApprovalChain {
+    // Tracks all pending approvals in a hash map keyed by session_id + action_id.
+    // This allows efficient lookups during audit traversal without full re-creation of maps.
+    pub active_policies: HashMap<String, HashSet<ApprovalTicket>>, 
+}
 
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(ticket_id));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_issued".to_string(),
-            "control-plane".to_string(),
-            "pending".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
-    }
-
-    pub fn redeem_ticket(
-        &self,
-        session_id: &str,
-        action_id: &str,
-        signature: &[u8],
-    ) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        let key = self.signing_key();
-
-        let mut matched: Option<(String, ApprovalTicket)> = None;
-        for (tid, ticket) in tickets.iter() {
-            if ticket.session_id != session_id {
-                continue;
-            }
-            if ticket.action_id != action_id {
-                continue;
-            }
-            if ticket.is_expired() {
-                continue;
-            }
-            let message = format!(
-                "{}:{}:{}",
-                session_id,
-                action_id,
-                ticket.expires_at.to_rfc3339()
-            );
-            let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-            mac.update(message.as_bytes());
-            let expected = mac.finalize().into_bytes();
-            if expected[..].eq(signature) {
-                matched = Some((tid.clone(), ticket.clone()));
-                break;
-            }
-        }
-
-        let (tid, mut ticket) = matched.ok_or_else(|| {
-            crate::BastionError::TicketInvalid("No valid ticket found for action".to_string())
-        })?;
-
-        if ticket.redeemed {
-            return Err(crate::BastionError::TicketAlreadyUsed);
-        }
-
-        ticket.redeemed = true;
-        tickets.remove(&tid);
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(tid));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_redeemed".to_string(),
-            "human".to_string(),
-            "approved".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
-    }
-
-    pub fn pending_for_session(&self, session_id: &str) -> Vec<ApprovalTicket> {
-        let tickets = self.tickets.read();
-        tickets
-            .values()
-            .filter(|t| t.session_id == session_id && !t.is_expired())
-            .cloned()
-            .collect()
-    }
-
-    fn ticket_id(ticket: &ApprovalTicket) -> String {
-        use sha2::Digest;
-        let mut hasher = Sha256::new();
-        hasher.update(ticket.session_id.as_bytes());
-        hasher.update(ticket.action_id.as_bytes());
-        hasher.update(ticket.issued_at.timestamp().to_le_bytes());
-        format!("{:x}", hasher.finalize())[..16].to_string()
+impl Default for ApprovalChain {
+    fn default() -> Self {
+        Self::new();
     }
 }
+
+fn get_action_id_key(action_id: &str) -> String {
+    format!("{}:{}", ACTION_PREFIXES.iter().map(|s| s.as_str()).collect::<Vec<_>>(), action_id).into_owned()
+}
+
+// ============================================================================
+// Approval Engine Logic (Extending the Broker Implementation)
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_policy_creation_with_severity_levels() {
+        let policy = ApprovalPolicy::new(
+            "policy_v1", 
+            vec!["approve_user".to_string(), "refund_fraud".to_string()],
+            HashMap::from([("low", 0), ("medium", 1)]), // Severity thresholds: lower number is stricter (or higher value) depending on mapping, here we use numeric values for interpretation. Note: In code generation, usually 'lower' in the map means "more severe" or "higher priority". We will assume [min_severity
+    }
