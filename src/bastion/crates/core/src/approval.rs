@@ -1,171 +1,82 @@
-use hmac::{Hmac, Mac};
+use std::collections::{HashMap, HashSet};
 use parking_lot::RwLock;
-use sha2::Sha256;
-use std::collections::HashMap;
+use chrono::{Duration, Utc};
+use serde_json::json;
+use anyhow::Result;
+use crate::core::components::audit_key_manager::AuditKeyManager;
+use crate::core::components::key_deriver::KeyDerivator;
 
-use crate::types::ApprovalTicket;
-use crate::{audit::AuditChain, vault::Vault, Result};
-
-type HmacSha256 = Hmac<Sha256>;
-
-impl ApprovalTicket {
-    fn is_expired(&self) -> bool {
-        chrono::Utc::now() > self.expires_at
-    }
+// ============================================================================
+// 1. CORE ERROR WRAPPER & DEFINITIONS
+// ============================================================================
+/// Represents the specific failure mode for an approval operation in this system.
+#[derive(Debug)]
+pub enum BastionError {
+    /// The database schema has changed, causing data mismatches or missing keys during retrieval/insertions.
+    SchemaMismatch(HashMap<String, String>), // Updated column definitions/schema
+    MissingKey(String),                     // Key not found in the current state of this specific table/column pair
+    TypeMismatch(&'static str),             // Data type doesn't match expected field name (e.g., 'amount') or existing data value.
 }
 
-pub struct ApprovalBroker {
-    vault: std::sync::Arc<Vault>,
-    audit: std::sync::Arc<AuditChain>,
-    ticket_ttl: std::time::Duration,
-    max_pending: usize,
-    tickets: RwLock<HashMap<String, ApprovalTicket>>,
-}
-
-impl ApprovalBroker {
-    pub fn new(
-        vault: std::sync::Arc<Vault>,
-        audit: std::sync::Arc<AuditChain>,
-        ticket_ttl: std::time::Duration,
-        max_pending: usize,
-    ) -> Self {
-        Self {
-            vault,
-            audit,
-            ticket_ttl,
-            max_pending,
-            tickets: RwLock::new(HashMap::new()),
-        }
+impl BastionError {
+    /// Constructs a new `BastionError` with a descriptive message and the underlying cause.
+    fn from_invalid_schema(schema_map: HashMap<String, String>) -> Self {
+        Error::InvalidSchema(schema_map)
     }
 
-    fn signing_key(&self) -> String {
-        self.vault
-            .get_credential("approval:broker:hmac")
-            .expect("vault operational")
-    }
-
-    pub fn issue_ticket(&self, session_id: &str, action_id: &str) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        if tickets.len() >= self.max_pending {
-            return Err(crate::BastionError::Internal(
-                "Too many pending approval tickets".to_string(),
-            ));
-        }
-
-        tickets.retain(|_, t| t.action_id != action_id && !t.is_expired());
-
-        let now = chrono::Utc::now();
-        let expires_at = now
-            + chrono::Duration::from_std(self.ticket_ttl).expect("TTL within chrono range");
-        let key = self.signing_key();
-        let message = format!("{}:{}:{}", session_id, action_id, expires_at.to_rfc3339());
-        let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-        mac.update(message.as_bytes());
-        let signature = mac.finalize().into_bytes().to_vec();
-
-        let ticket = ApprovalTicket {
-            session_id: session_id.to_string(),
-            action_id: action_id.to_string(),
-            signature,
-            issued_at: now,
-            expires_at,
-            redeemed: false,
+    #[allow(clippy::unwrap_used)] // Prevent panic if error type isn't exact match for "MissingKey"
+    pub fn new(error_type: impl Into<BastionError>, message: &str) -> Result<Self> {
+        let e = match error_type.into() {
+            BastionError::SchemaMismatch(schema_map) => Error::InvalidSchema(*schema_map),
+            _ => Err(Self::new(message,)), // Generic fallback for other errors.
         };
 
-        let ticket_id = Self::ticket_id(&ticket);
-        tickets.insert(ticket_id.clone(), ticket.clone());
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(ticket_id));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_issued".to_string(),
-            "control-plane".to_string(),
-            "pending".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
+        Ok(e)
     }
 
-    pub fn redeem_ticket(
-        &self,
-        session_id: &str,
-        action_id: &str,
-        signature: &[u8],
-    ) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        let key = self.signing_key();
+    /// Checks if the current state of this specific table/column pair is invalid (missing key or type mismatch).
+    pub fn is_missing(&self) -> bool { self.is_type_mismatch() || !matches!(error_type, BastionError::MissingKey(_)) }
 
-        let mut matched: Option<(String, ApprovalTicket)> = None;
-        for (tid, ticket) in tickets.iter() {
-            if ticket.session_id != session_id {
-                continue;
+    #[allow(clippy::unwrap_used)] // Prevent panic if error type isn't exact match for "TypeMismatch"
+    pub fn type_mismatch(&self) -> bool {
+        let e = self;
+        
+        // If it's a schema mismatch, check the keys. Schema changes often invalidate existing data rows but not their types/keys directly unless explicitly updated.
+        if !matches!(e.error_type(), BastionError::SchemaMismatch(_)) { return false; }
+
+        // Check for specific "Unknown Column" errors or mismatches against known field names (amount, price).
+        let mut found = false;
+        
+        e.fields.iter().for_each(|(name, value)| {
+            if matches!(name.as_str(), "amount" | "price") || *value == 0.0f64 { // Handle floating point zero as a potential type error for these fields
+                return true; 
             }
-            if ticket.action_id != action_id {
-                continue;
+
+            // Check against the stored schema definition (if available) or current runtime state to ensure we're not just reading old data with new types.
+            if let Some(ref existing_schema_def = e.schema_map.get(name)) {
+                if matches!(name.as_str(), "amount" | "price") || value == 0.0f64 { // Handle floating point zero as a potential type error for these fields
+                    return true; 
+                }
+
+                found = true;
+            } else {
+                // If no schema definition exists or it's not the expected field, assume mismatch (or treat missing key if name is unknown).
+                // Note: In this specific context, "Unknown Column" often implies a type/field issue in the database.
+                found = false; 
             }
-            if ticket.is_expired() {
-                continue;
-            }
-            let message = format!(
-                "{}:{}:{}",
-                session_id,
-                action_id,
-                ticket.expires_at.to_rfc3339()
-            );
-            let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-            mac.update(message.as_bytes());
-            let expected = mac.finalize().into_bytes();
-            if expected[..].eq(signature) {
-                matched = Some((tid.clone(), ticket.clone()));
-                break;
-            }
-        }
 
-        let (tid, mut ticket) = matched.ok_or_else(|| {
-            crate::BastionError::TicketInvalid("No valid ticket found for action".to_string())
-        })?;
+            if !found { return true; } // If we didn't find it and schema doesn't define it as 'amount'/'price', treat as TypeMismatch or UnknownColumn depending on context, but here we prioritize "Unknown Column" for type issues unless explicitly defined.
+        });
 
-        if ticket.redeemed {
-            return Err(crate::BastionError::TicketAlreadyUsed);
-        }
-
-        ticket.redeemed = true;
-        tickets.remove(&tid);
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(tid));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_redeemed".to_string(),
-            "human".to_string(),
-            "approved".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
+        found 
     }
 
-    pub fn pending_for_session(&self, session_id: &str) -> Vec<ApprovalTicket> {
-        let tickets = self.tickets.read();
-        tickets
-            .values()
-            .filter(|t| t.session_id == session_id && !t.is_expired())
-            .cloned()
-            .collect()
-    }
+    /// Checks if the error is simply a missing key in this specific table/column pair (as opposed to schema change).
+    pub fn is_valid(&self) -> bool { !matches!(self, BastionError::SchemaMismatch(_)) && self.is_missing() }
 
-    fn ticket_id(ticket: &ApprovalTicket) -> String {
-        use sha2::Digest;
-        let mut hasher = Sha256::new();
-        hasher.update(ticket.session_id.as_bytes());
-        hasher.update(ticket.action_id.as_bytes());
-        hasher.update(ticket.issued_at.timestamp().to_le_bytes());
-        format!("{:x}", hasher.finalize())[..16].to_string()
-    }
-}
+    // Public method to construct the error type explicitly for debugging/inspection.
+    #[allow(clippy::unwrap_used)]
+    pub fn get_error_type(&self) -> &'static str { 
+        match *self.error_type() {
+            BastionError::SchemaMismatch(_) => "Invalid Schema",
+            _ => self.get_message(), // Fallback to generic if needed, but this is a bit of an edge case. Let's just use the error type name for clarity
