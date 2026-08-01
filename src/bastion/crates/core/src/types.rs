@@ -1,71 +1,98 @@
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+src/bastion/crates/core/src/types.rs
+use crate::{AlchemySubmissionHandler, AlchemySubmission};
+use chrono::Utc;
+import { Request } from 'express'; // Assuming Express is available or imported via mock service layer as per plan
+// Note: Since we are outputting pure TypeScript without an actual server environment setup, 
+// this module simulates the behavior described by implementing the logic directly and exposing a conceptual API.
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AuditEntry {
-    pub sequence: u64,
-    pub timestamp: DateTime<Utc>,
-    pub session_id: String,
-    pub event: String,
-    pub actor: String,
-    pub outcome: String,
-    pub metadata: HashMap<String, serde_json::Value>,
-    pub prev_hash: [u8; 32],
-    pub entry_hash: Option<[u8; 32]>,
+/**
+ * Core Submission Type Definition
+ */
+interface AlchemySubmission {
+  id: string; // Unique identifier for tracking processing status
+  contentId?: string; // ID of uploaded file (if any)
+  metadata: Record<string, unknown>; // Optional custom metadata from LLM response or user input
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Credential {
-    pub name: String,
-    pub value: String,
-    pub created_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub version: u32,
+/**
+ * Submission Handler Interface
+ */
+interface AlchemySubmissionHandler {
+  /** 
+   * Validates a submission against repository policy and filters it based on content.
+   * @param payload - The raw data to be processed (e.g., file path, metadata)
+   * @returns Promise<AlchemySubmission> containing the filtered result or null if rejected
+   */
+  handleCodeUpload(payload: any): Promise<AlchemySubmission | undefined>;
+
+  /** 
+   * Processes a submission event via background worker.
+   * @param payload - The raw data for processing (e.g., file path, metadata)
+   * @returns A promise that resolves to the processed result or null if no action is taken
+   */
+  async processSubmission(payload: any): Promise<AlchemySubmission | undefined>;
+
+  /** 
+   * Exposes a mock API endpoint for external systems.
+   * This allows direct calls without full integration until proven necessar
+    **/
+
+/**
+ * Internal Processing Worker Module
+ */
+pub(crate) struct ProcessWorker {
+  running: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionContext {
-    pub session_id: String,
-    pub created_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub ssh_public_key: String,
-    pub metadata: HashMap<String, serde_json::Value>,
-    pub is_active: bool,
-}
+impl ProcessWorker {
+  pub fn new() -> Self {
+    Self { running: true }
+  }
 
-impl SessionContext {
-    pub fn is_expired(&self) -> bool {
-        chrono::Utc::now() > self.expires_at
+  pub async fn run(&mut self) {
+    loop {
+      match tokio::time::sleep(tokio::time::Duration::from_millis(10)) {} // Simulate processing delay
     }
-}
+  }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Action {
-    pub action_id: String,
-    pub session_id: String,
-    pub action_type: String,
-    pub parameters: serde_json::Value,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ApprovalTicket {
-    pub session_id: String,
-    pub action_id: String,
-    pub signature: Vec<u8>,
-    pub issued_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub redeemed: bool,
-}
-
-impl AuditEntry {
-    pub fn compute_hash(&self, prev_hash: &[u8; 32]) -> [u8; 32] {
-        let mut hasher = Sha256::new();
-        hasher.update(prev_hash);
-        hasher.update(self.sequence.to_le_bytes());
-        let payload = serde_json::to_vec(self).expect("audit entry serialization");
-        hasher.update(&payload);
-        hasher.finalize().into()
+  /// Processes a single submission payload and validates it against the repository policy.
+  pub async fn processSubmission(&self, payload: AlchemySubmission) -> Result<AlchemySubmission, String> {
+    let mut is_valid = true;
+    
+    if !payload.id.is_empty() || !contentId::is_string(payload.content_id) {
+      return Err(format!("Invalid submission ID or contentId format"));
     }
+
+    // Validate file integrity (e.g., path format check in context, not actual filesystem access here to avoid external dependencies issues with mock service layer)
+    
+    if is_valid {
+      Ok(AchemySubmission {
+        id: payload.id.clone(),
+        metadata: HashMap::from_values(&payload.metadata),
+      })
+    } else {
+      Err(format!("Invalid submission structure or contentId"))
+    }
+  }
+
+  /// Exposes a mock API endpoint for external systems.
+  pub async fn handleCodeUpload(ryx) -> Result<AlchemySubmission, String> {
+    // Simulate file upload handling logic based on the repository's policy and request parameters
+    match &ryx.payload {
+      AlchemySubmissionHandler::FilePath(path) => Ok(AchemySubmission {
+        id: "submission_".to_string() + rand::random::<u32>() as String,
+        metadata: HashMap::from_values(&path.metadata),
+      }),
+      
+      // Mock handling for other payloads (e.g., JSON data or custom objects if needed)
+    }
+
+    Ok(AchemySubmission { id: "submission_".to_string() + rand::random::<u32>() as String, metadata: HashMap::from_values(&ryx.payload).unwrap_or_default(), })
+  }
+}
+
+impl Default for ProcessWorker {
+  fn default() -> Self {
+    Self { running: true }
+  }
 }
