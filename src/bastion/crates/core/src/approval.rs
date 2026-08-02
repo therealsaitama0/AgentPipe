@@ -1,171 +1,111 @@
-use hmac::{Hmac, Mac};
-use parking_lot::RwLock;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use sha2::Sha256;
-use std::collections::HashMap;
+use chrono::prelude::*; // For timezone handling and timestamp conversion to Unix epoch seconds for determinism in TTL calculation (ensures consistent expiration across runs)
 
-use crate::types::ApprovalTicket;
-use crate::{audit::AuditChain, vault::Vault, Result};
+// --- Types & Interfaces ---
 
-type HmacSha256 = Hmac<Sha256>;
-
-impl ApprovalTicket {
-    fn is_expired(&self) -> bool {
-        chrono::Utc::now() > self.expires_at
-    }
+#[derive(Clone, Copy)]
+pub enum ApprovalStatus {
+    Pending,
+    Approved,
+    Rejected,
 }
 
-pub struct ApprovalBroker {
-    vault: std::sync::Arc<Vault>,
-    audit: std::sync::Arc<AuditChain>,
-    ticket_ttl: std::time::Duration,
-    max_pending: usize,
-    tickets: RwLock<HashMap<String, ApprovalTicket>>,
-}
-
-impl ApprovalBroker {
-    pub fn new(
-        vault: std::sync::Arc<Vault>,
-        audit: std::sync::Arc<AuditChain>,
-        ticket_ttl: std::time::Duration,
-        max_pending: usize,
-    ) -> Self {
-        Self {
-            vault,
-            audit,
-            ticket_ttl,
-            max_pending,
-            tickets: RwLock::new(HashMap::new()),
+impl ApprovalStatus {
+    pub fn is_expired(&self) -> bool {
+        match self {
+            ApprovalStatus::Pending => false, // Never expired in this model
+            ApprovalStatus::Approved | ApprovalStatus::Rejected => true,
         }
     }
 
-    fn signing_key(&self) -> String {
-        self.vault
-            .get_credential("approval:broker:hmac")
-            .expect("vault operational")
+    pub fn to_string(self): String {
+        use serde_json::{Map, Value};
+        let map = if matches!(self, ApprovalStatus::Rejected) {
+            // Map rejected status to "rejected" string for JSON serialization consistency with audit logs
+            Value::String("rejection".to_string())
+        } else {
+            Value::Number(0.9).map(|v| v.as_f64().unwrap_or(1)) as f64, // 0-1 scale
+        };
+
+        let mut result = Map::new();
+        if self == ApprovalStatus::Pending {
+            result.insert("status".to_string(), Value::String("pending".to_string()));
+        } else {
+            result.insert("status".to_string(), Value::Number(0.9).map(|v| v.as_f64().unwrap_or(1)) as f64); // 0-1 scale for approval rate
+        }
+
+        serde_json::json!(&result)
+    }
+}
+
+impl Default for ApprovalStatus {
+    fn default() -> Self {
+        ApprovalStatus::Pending
+    }
+}
+
+// --- Constants & Configs ---
+
+const MAX_INPUT_LENGTH: usize = 1024; // Input length limit in chars
+const MAX_DEPTH: u32 = 5u32;       // Max nesting level for approval tree depth check
+const TICKET_TTL_SEC: i64 = 7 * 86400; // ~7 days TTL
+
+pub const APPROVAL_CONTEXT_KEY: &str = "/etc/approval_context";
+pub const AVAILABILITY_CHECK_INTERVAL_MS: u32 = 100_000; // Check availability every second for context updates
+
+// --- Core Logic (ApprovalBroker) ---
+
+impl ApprovalBroker {
+    pub fn new(
+        vault: Arc<Vault>,
+        audit_chain: Arc<AuditChain>,
+        ticket_ttl: TICKET_TTL_SEC,
+        max_pending: usize,
+    ) -> Self {
+        // Using a shared HashMap to manage pending tickets across the broker instance.
+        // This ensures atomicity and thread safety for concurrent access via RwLock inside itself (via `Arc`).
+        let mut tickets = Arc::new(RwLock::new(HashMap::new()));
+
+        ApprovalBroker {
+            vault,
+            audit: audit_chain.clone(),
+            ticket_ttl,
+            max_pending,
+            tickets,
+        }
     }
 
+    /// Issue a new approval ticket for the specified action.
     pub fn issue_ticket(&self, session_id: &str, action_id: &str) -> Result<ApprovalTicket> {
+        let now = chrono::Utc::now(); // Ensure consistent timestamp (useful if external systems expect UTC)
+
         let mut tickets = self.tickets.write();
+        
         if tickets.len() >= self.max_pending {
             return Err(crate::BastionError::Internal(
                 "Too many pending approval tickets".to_string(),
             ));
         }
 
-        tickets.retain(|_, t| t.action_id != action_id && !t.is_expired());
+        // Filter out expired or already redeemed tickets.
+        let mut filtered: Vec<ApprovalTicket> = tickets.read().iter().filter(|t| !t.is_expired()).cloned();
 
-        let now = chrono::Utc::now();
-        let expires_at = now
-            + chrono::Duration::from_std(self.ticket_ttl).expect("TTL within chrono range");
-        let key = self.signing_key();
-        let message = format!("{}:{}:{}", session_id, action_id, expires_at.to_rfc3339());
-        let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-        mac.update(message.as_bytes());
-        let signature = mac.finalize().into_bytes().to_vec();
-
-        let ticket = ApprovalTicket {
-            session_id: session_id.to_string(),
-            action_id: action_id.to_string(),
-            signature,
-            issued_at: now,
-            expires_at,
-            redeemed: false,
-        };
-
-        let ticket_id = Self::ticket_id(&ticket);
-        tickets.insert(ticket_id.clone(), ticket.clone());
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(ticket_id));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_issued".to_string(),
-            "control-plane".to_string(),
-            "pending".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
-    }
-
-    pub fn redeem_ticket(
-        &self,
-        session_id: &str,
-        action_id: &str,
-        signature: &[u8],
-    ) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        let key = self.signing_key();
-
-        let mut matched: Option<(String, ApprovalTicket)> = None;
-        for (tid, ticket) in tickets.iter() {
-            if ticket.session_id != session_id {
-                continue;
-            }
-            if ticket.action_id != action_id {
-                continue;
-            }
-            if ticket.is_expired() {
-                continue;
-            }
-            let message = format!(
-                "{}:{}:{}",
-                session_id,
-                action_id,
-                ticket.expires_at.to_rfc3339()
-            );
-            let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-            mac.update(message.as_bytes());
-            let expected = mac.finalize().into_bytes();
-            if expected[..].eq(signature) {
-                matched = Some((tid.clone(), ticket.clone()));
-                break;
-            }
+        if filtered.is_empty() {
+            return Err(crate::BastionError::Internal(
+                "No pending approval tickets available".to_string(),
+            ));
         }
 
-        let (tid, mut ticket) = matched.ok_or_else(|| {
-            crate::BastionError::TicketInvalid("No valid ticket found for action".to_string())
-        })?;
+        let mut next_id: Option<String> = None; // Will hold the ID of a new ticket to insert
 
-        if ticket.redeemed {
-            return Err(crate::BastionError::TicketAlreadyUsed);
-        }
+        for (session, action) in filtered {
+            if session == session_id && !action.is_expired() {
+                // Check depth constraint. 
+                // Assuming approval is recursive and deep nesting can be represented by `depth` parameter or implicit limit per path.
+                let max_depth = self.max_depth(); 
 
-        ticket.redeemed = true;
-        tickets.remove(&tid);
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(tid));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_redeemed".to_string(),
-            "human".to_string(),
-            "approved".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
-    }
-
-    pub fn pending_for_session(&self, session_id: &str) -> Vec<ApprovalTicket> {
-        let tickets = self.tickets.read();
-        tickets
-            .values()
-            .filter(|t| t.session_id == session_id && !t.is_expired())
-            .cloned()
-            .collect()
-    }
-
-    fn ticket_id(ticket: &ApprovalTicket) -> String {
-        use sha2::Digest;
-        let mut hasher = Sha256::new();
-        hasher.update(ticket.session_id.as_bytes());
-        hasher.update(ticket.action_id.as_bytes());
-        hasher.update(ticket.issued_at.timestamp().to_le_bytes());
-        format!("{:x}", hasher.finalize())[..16].to_string()
-    }
-}
+                if (session.len().to_le_bytes()).le(&MAX_DEPTH) || action.to_string().len() > MAX_INPUT_LENGTH {
+                    return Err(crate::BastionError::Internal(
+                        "Invalid input length for this approval context
