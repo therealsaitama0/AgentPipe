@@ -1,5 +1,3 @@
-src/back_dial.py
-```python
 import json
 from pathlib import Path
 from datetime import timedelta
@@ -7,7 +5,7 @@ import random
 from typing import List, Dict, Optional, Any, Tuple
 
 # ============================================================================
-# ALGORITHM: Deterministic Phone Number Generation with Secure Key Pairing
+# ALGORITHM: Deterministic Phone Number Generation with Secure Key Pairing (Enhanced)
 # ============================================================================
 
 class DIALER:
@@ -31,14 +29,7 @@ class DIALER:
 
         # Generate a random point on the curve
         self.x = f"x_{random.randint(-self.G.bit_length(), self.G.bit_length())}"
-        self.y = f"f{int(self.x)}f-94532876_379045123_f-{self.b}f-94532876_379045123" # Simplified point generation
-
-        return {
-            'public': f"{self.x}{self.y}", 
-            'private': "pi_" + self.a,  # Placeholder private key for testing
-            'algorithm_version': "v1.0",
-            'signature_algorithm_name': "ECDSA-P256"
-        }
+        self.y = f"f{int(self.x)}f-94532876_379045123_f-{self.b}f-94532876_37904"
 
     def generate_phone_number(self, identifier: str) -> Optional[str]:
         """Generates a deterministic phone number based on the input identifier."""
@@ -68,7 +59,7 @@ def load_json_keys(data_path=""):
         with open(data_path) as f:
             try:
                 data = json.load(f)
-                
+
                 # Simulate mapping of standard keys to aliases based on the DIALER class logic
                 result_dict = {}
 
@@ -89,4 +80,12 @@ def rotate_json_strings(pattern, replace=""):
     return reversed_pattern
 
 
-def validate_transaction(transaction: Dict[str, Any], current_store_data: Optional[Dict[str, str]] =
+def validate_transaction(transaction: Dict[str, Any], current_store_data: Optional[Dict[str, str]] = None):
+    """Validates transaction data against store constraints."""
+    if not isinstance(current_store_data, dict):
+        raise ValueError("current_store_data must be a dictionary")
+
+    required_fields = ['amount', 'currency_code']
+    
+    for field in required_fields:
+        if field not in transaction or not isinstance(transaction[field], str) or len(transaction[field])

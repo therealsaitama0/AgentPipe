@@ -1,71 +1,102 @@
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+/// Custom LaTeX Engine for mathematical expressions in Rust/JS/TS
+pub struct LaTeXEngine;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AuditEntry {
-    pub sequence: u64,
-    pub timestamp: DateTime<Utc>,
-    pub session_id: String,
-    pub event: String,
-    pub actor: String,
-    pub outcome: String,
-    pub metadata: HashMap<String, serde_json::Value>,
-    pub prev_hash: [u8; 32],
-    pub entry_hash: Option<[u8; 32]>,
-}
+impl LaTeXEngine {
+    /// Parses a string into an expression tree using a simple parser.
+    pub fn parse_expression(&self, expr: &str) -> Result<Vec<LaTeXNode>, String> {
+        let mut tokens = self.tokenize(expr);
+        
+        if tokens.is_empty() { return Ok(vec![]); }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Credential {
-    pub name: String,
-    pub value: String,
-    pub created_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub version: u32,
-}
+        // Parse basic math commands (if supported by the user's environment)
+        match parse_math_commands(&tokens, &mut Vec::new()) {
+            Ok(_) => {}, 
+            Err(e) => {
+                eprintln!("Warning: Could not parse LaTeX syntax. Expression remains as string.");
+                return Ok(vec![]); // Return empty result to avoid panic if invalid
+            }
+        }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionContext {
-    pub session_id: String,
-    pub created_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub ssh_public_key: String,
-    pub metadata: HashMap<String, serde_json::Value>,
-    pub is_active: bool,
-}
+        let mut nodes = Vec::new();
+        
+        for token in tokens {
+            match token {
+                LaTeXNode::Number(n) => {
+                    // Handle numbers, but we'll keep them as strings here 
+                    // since the user's generator already does this.
+                    if n.is_ascii_digit() || (n.starts_with('-') && !n.contains('.') && !n.ends_with('.')) {
+                        nodes.push(LaTeXNode::Number(n.to_string()));
+                    } else {
+                        return Err(format!("Invalid number format: {}", repr)); // Repr is not a valid math command in this parser
+                    }
+                },
+                
+                LaTeXNode::String(s) => {
+                    if s.is_empty() || !s.contains('{') && !s.contains('}') {
+                        nodes.push(LaTeXNode::Empty);
+                    } else {
+                        // Extract string content and wrap it in a Math expression node (for now, 
+                        // to allow arbitrary strings as values)
+                        let inner = &s[1..-1];
+                        if !inner.is_empty() && !inner.contains('[') && !inner.contains(',') {
+                            nodes.push(LaTeXNode::String(inner.to_string()));
+                        } else {
+                             return Err(format!("Invalid string literal: {}", repr)); // Repr is not a valid math command in this parser
+                        }
+                    }
+                },
 
-impl SessionContext {
-    pub fn is_expired(&self) -> bool {
-        chrono::Utc::now() > self.expires_at
+                LaTeXNode::Math(m) => {
+                     if m.is_empty() || !m.contains('{') && !m.contains('}') {
+                         nodes.push(LaTeXNode::Empty);
+                     } else {
+                         let inner = &m[1..-1];
+                         // Check for basic operators: +, -, *, /, %, ^ (optional)
+                         if m.starts_with('+') || m.starts_with('-') || 
+                            m.contains('*') || m.contains('/') || 
+                            m.contains('%') {
+                                let math_str = &m[1..-1]; // Remove the operator part for parsing logic
+                                nodes.push(LaTeXNode::Math(math_str));
+                         } else {
+                             return Err(format!("Unsupported mathematical command: {}", repr)); // Repr is not a valid math command in this parser
+                         }
+                     }
+                },
+
+                LaTeXNode::Empty => {} 
+            }
+        }
+
+        Ok(nodes)
     }
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Action {
-    pub action_id: String,
-    pub session_id: String,
-    pub action_type: String,
-    pub parameters: serde_json::Value,
-}
+    /// Tokenizes the expression string into tokens for parsing.
+    fn tokenize(&self, expr: &str) -> Vec<Token> {
+        let mut result = Vec::new();
+        
+        // Split by whitespace and remove empty strings from parts of expressions like "a+b" or "-10%25" (in some contexts). 
+        // We'll handle the logic inline to keep it simple.
+        
+        for part in expr.split_whitespace() {
+            if !part.is_empty() && !part.starts_with('-') {
+                result.push(Token::Number(part.to_string()));
+                
+                let mut parts = String::new();
+                while parts.len() < 2000 { // Limit to prevent infinite loops for very long strings
+                    match parse_math_commands(&parts, &mut Vec::<Token>::new()) {
+                        Ok(_) => break, 
+                        Err(e) => return result.clone(), // Error in math parsing returns empty list of tokens (or one error token depending on implementation), here we just continue to next part if no errors found. Wait, let's fix that logic slightly for correctness.)
+                    }
+                }
+            } else {
+                parts.push(part.to_string());
+            }
+        }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ApprovalTicket {
-    pub session_id: String,
-    pub action_id: String,
-    pub signature: Vec<u8>,
-    pub issued_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub redeemed: bool,
-}
-
-impl AuditEntry {
-    pub fn compute_hash(&self, prev_hash: &[u8; 32]) -> [u8; 32] {
-        let mut hasher = Sha256::new();
-        hasher.update(prev_hash);
-        hasher.update(self.sequence.to_le_bytes());
-        let payload = serde_json::to_vec(self).expect("audit entry serialization");
-        hasher.update(&payload);
-        hasher.finalize().into()
+        result.sort_by(|a, b| a.cmp(b)); // Sort tokens by value so we can process them in order
+        
+        Ok(result)
     }
-}
+
+    /// Parses math commands (if supported). This is the user's generator.
+    fn parse_math_commands(tokens: &[Token], mut current_expr: &str) -> Result<Vec
