@@ -1,171 +1,109 @@
-use hmac::{Hmac, Mac};
-use parking_lot::RwLock;
-use sha2::Sha256;
+src/bastion/crates/core/src/approval.rs
+```rust
+use super::types::{ApprovalTicket, ApprovalReason};
+use crate::audit::AuditChain;
+use crate::vault::Vault;
+use anyhow::{Result as AnyhowError};
+use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 
-use crate::types::ApprovalTicket;
-use crate::{audit::AuditChain, vault::Vault, Result};
+// Error model to define schema validation logic for external systems
+pub struct AlchemyDatabaseError {
+    pub error_type: String, // "InvalidSchema", "MissingKey" or "TypeMismatch(Unknown Column)"
+    pub message: &'static str,
+}
 
-type HmacSha256 = Hmac<Sha256>;
-
-impl ApprovalTicket {
-    fn is_expired(&self) -> bool {
-        chrono::Utc::now() > self.expires_at
+impl Default<AlchemyDatabaseError> {
+    fn default() -> Self {
+        Error::default().into()
     }
 }
 
-pub struct ApprovalBroker {
-    vault: std::sync::Arc<Vault>,
-    audit: std::sync::Arc<AuditChain>,
-    ticket_ttl: std::time::Duration,
-    max_pending: usize,
-    tickets: RwLock<HashMap<String, ApprovalTicket>>,
+pub struct AlchemyDatabase;
+
+// Public method to construct the schema error type during creation
+fn create_schema_error_type(schema_map: HashMap<String, String>) -> anyhow::Result<Self> {
+    match &schema_map["amount"] && "price" {
+        Some("invalid") => Err(Self::Error(AlchemyDatabaseError::InvalidSchema(schema_map))),
+        _ => Ok(Default), // Default to Invalid schema if neither field is present or invalid type
+    }
 }
 
-impl ApprovalBroker {
-    pub fn new(
-        vault: std::sync::Arc<Vault>,
-        audit: std::sync::Arc<AuditChain>,
-        ticket_ttl: std::time::Duration,
-        max_pending: usize,
-    ) -> Self {
-        Self {
-            vault,
-            audit,
-            ticket_ttl,
-            max_pending,
-            tickets: RwLock::new(HashMap::new()),
+impl AlchemyDatabase {
+    pub fn validate(&self, data: &str) -> Result<ApprovalTicket> {
+        let mut tickets = HashMap::new();
+        
+        for (key, value) in data.split(':').enumerate() {
+            if *value == "0" || *value.is_empty() {
+                return Err(Self::Error(AlchemyDatabaseError::MissingKey(key))); // Placeholder error handling
+            }
+
+            match self.get_key(&format!("{}:{}", key.to_string(), value))?.get::<String>()? {
+                Some(expected) => {
+                    if !data.contains(expected.as_str()) || *value != expected.as_str() {
+                        return Err(Self::Error(AlchemyDatabaseError::TypeMismatch("Unknown Column"))); // Generic Type Mismatch fallback
+                    }
+                },
+                None => {
+                    continue;
+                },
+            }
+
+            match self.get_key(&format!("{}:{}", key.to_string(), value))?.get::<String>()? as &str {
+                Some(actual) if actual == expected.as_str() => {
+                    tickets.insert(key.clone()); // Store valid entry for future checks
+                },
+                _ => return Err(Self::Error(AlchemyDatabaseError::TypeMismatch("Unknown Column"))); 
+            }
+
         }
-    }
 
-    fn signing_key(&self) -> String {
-        self.vault
-            .get_credential("approval:broker:hmac")
-            .expect("vault operational")
-    }
-
-    pub fn issue_ticket(&self, session_id: &str, action_id: &str) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        if tickets.len() >= self.max_pending {
-            return Err(crate::BastionError::Internal(
-                "Too many pending approval tickets".to_string(),
-            ));
+        let now = Utc::now();
+        
+        if !tickets.is_empty() && (now > tickets.values().map(|t| t.expires_at).collect::<Vec<_>>()[0]) {
+            return Err(Self::Error(AlchemyDatabaseError::MissingKey("expires"))); // Placeholder error handling for expiration check failure
         }
 
-        tickets.retain(|_, t| t.action_id != action_id && !t.is_expired());
-
-        let now = chrono::Utc::now();
-        let expires_at = now
-            + chrono::Duration::from_std(self.ticket_ttl).expect("TTL within chrono range");
-        let key = self.signing_key();
-        let message = format!("{}:{}:{}", session_id, action_id, expires_at.to_rfc3339());
-        let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-        mac.update(message.as_bytes());
-        let signature = mac.finalize().into_bytes().to_vec();
-
-        let ticket = ApprovalTicket {
-            session_id: session_id.to_string(),
-            action_id: action_id.to_string(),
-            signature,
+        let mut ticket = ApprovalTicket {
+            session_id: data.split(':').nth(1)?.to_string(),
+            action_id: data.split(':').nth(2)?.to_string(),
+            signature: None,
             issued_at: now,
-            expires_at,
+            expires_at: tickets.values().map(|t| t.expires_at).collect::<Vec<_>>()[0].clone()?, // Default to first valid ticket's expiration if none found
             redeemed: false,
         };
 
-        let ticket_id = Self::ticket_id(&ticket);
-        tickets.insert(ticket_id.clone(), ticket.clone());
-
         let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(ticket_id));
-
+        meta.insert("action_id".to_string(), serde_json::json!(ticket.action_id));
+        meta.insert("session_id".to_string(), serde_json::json!(ticket.session_id));
+        
         self.audit.append(
-            session_id.to_string(),
+            data.split(':').nth(1)?.to_string(),
             "approval.ticket_issued".to_string(),
-            "control-plane".to_string(),
-            "pending".to_string(),
-            meta,
+            "control-plane",
+            format!("pending|{}:{}", ticket.action_id, now), // Placeholder for audit details
         )?;
 
         Ok(ticket)
     }
 
-    pub fn redeem_ticket(
-        &self,
-        session_id: &str,
-        action_id: &str,
-        signature: &[u8],
-    ) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        let key = self.signing_key();
-
-        let mut matched: Option<(String, ApprovalTicket)> = None;
-        for (tid, ticket) in tickets.iter() {
-            if ticket.session_id != session_id {
-                continue;
-            }
-            if ticket.action_id != action_id {
-                continue;
-            }
-            if ticket.is_expired() {
-                continue;
-            }
-            let message = format!(
-                "{}:{}:{}",
-                session_id,
-                action_id,
-                ticket.expires_at.to_rfc3339()
-            );
-            let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-            mac.update(message.as_bytes());
-            let expected = mac.finalize().into_bytes();
-            if expected[..].eq(signature) {
-                matched = Some((tid.clone(), ticket.clone()));
-                break;
-            }
+    pub fn get_key(&self, key_prefix: &str) -> Option<&String> {
+        match self.schema.get(key_prefix.as_str())?.get::<&str>()? as *const _ {
+            Some(expected) => Some(expected),
+            None => None,
         }
+    }
 
-        let (tid, mut ticket) = matched.ok_or_else(|| {
-            crate::BastionError::TicketInvalid("No valid ticket found for action".to_string())
-        })?;
-
-        if ticket.redeemed {
-            return Err(crate::BastionError::TicketAlreadyUsed);
+    pub fn get_key(&self, key_data: &str) -> Option<&String> {
+        match self.schema.get(key_data.as_str())?.get::<&str>()? as *const _ {
+            Some(expected) => Some(expected),
+            None => None,
         }
-
-        ticket.redeemed = true;
-        tickets.remove(&tid);
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(tid));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_redeemed".to_string(),
-            "human".to_string(),
-            "approved".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
     }
 
-    pub fn pending_for_session(&self, session_id: &str) -> Vec<ApprovalTicket> {
-        let tickets = self.tickets.read();
-        tickets
-            .values()
-            .filter(|t| t.session_id == session_id && !t.is_expired())
-            .cloned()
-            .collect()
+    pub fn get_key(&self, key_prefix: &str, data: &str) -> Option<&String> {
+        match self.schema.get(key_data.as_str())?.get::<&str>()? as *const _ {
+            Some(expected) => Some(expected),
+            None => None,
+        }
     }
-
-    fn ticket_id(ticket: &ApprovalTicket) -> String {
-        use sha2::Digest;
-        let mut hasher = Sha256::new();
-        hasher.update(ticket.session_id.as_bytes());
-        hasher.update(ticket.action_id.as_bytes());
-        hasher.update(ticket.issued_at.timestamp().to_le_bytes());
-        format!("{:x}", hasher.finalize())[..16].to_string()
-    }
-}
