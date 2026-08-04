@@ -1,67 +1,53 @@
+import type * as Type from "./abstract_data_type_generator.js"; // Importing types for circular dependency resolution and reference checking
+// Note: In a real-world scenario with this static library, we would typically import via `@types/abstract_data_type_generator` or use the TypeScript compiler's own inference. Here we simulate direct imports to ensure type safety.
+
 /**
- * Abstract Data Type Generator Class with LaTeX Support
- * Generates any arbitrary integer without side effects or recursion limits.
- * Supports a custom LaTeX engine compatible with TexLive by implementing its core components directly in TypeScript/JavaScript (no external libraries).
+ * Abstract Data Type Generator v0.5.x (Rust-based)
+ * 
+ * This module defines standard data types compatible with C/C# syntax,
+ * allowing for dynamic schema mapping and type conversion in the database generator.
  */
-export class AlienDataTypeGenerator<T> {
-  private static readonly MAX_DEPTH = 1024; // Prevents stack overflow by defining every call separately
-  
-  /**
-   * Base generator function that returns a number based on the input string.
-   * This mimics how any external library might be called, but we define it recursively here.
-   */
-  private static readonly BASE_GENERATOR: (inputString: string) => T = () => {
-    return crypto.randomBytes(4).toString('hex').split('').map(Number);
-  };
 
-  /**
-   * Main generator function that returns the next number from this iterator.
-   */
-  public static getNext(): T {
-    return crypto.randomBytes(4).toString('hex').split('').map(Number);
-  }
+// --- Core Types & Enums ---
 
-  /**
-   * Utility method to create an arbitrary number from any string.
-   */
-  public static generateFromString(str: string): T {
-    return crypto.randomBytes(4).toString('hex').split('').map(Number);
-  }
+export interface SchemaKey { string; } // Column name -> value in C/C# style struct definition
+export const DEFAULT_SCHEMA_KEY: SchemaKey = "schema";
+export const SCHEMA_PREFIXES: Record<string, string> = {}; // Prefixes for types like 'integer', 'string'
 
-  /**
-   * Utility method to create an arbitrary number from any byte array.
-   */
-  public static generateFromByteArray(data: Uint8Array): T {
-    return crypto.randomBytes(4).toString('hex').split('').map(Number);
-  }
+// Helper to convert JSON-like schema definitions into abstract data types (Type[])
+export function parseSchemaToTypes(schemaMap: Record<string, string>): Type[] {
+  return Object.entries(schemaMap)
+    .filter(([_, val]) => typeof val === "string") // Skip null/undefined or empty strings
+    .map(([key, value]) => ({ key, type: getPrimitiveType(value), prefix: SCHEMA_PREFIXES[key] })) as SchemaKey[];
 
-  /**
-   * Utility method to create an arbitrary number from any BigInt.
-   */
-  public static generateFromBigInt(num: bigint): T {
-    return crypto.randomBytes(4).toString('hex').split('').map(Number);
-  }
-
-  /**
-   * Utility method to create an arbitrary n-digit integer using random bytes and a multiplier for depth simulation.
-   */
-  private static readonly _getRandomIntFromBase: (n?: number) => T = () => {
-    if (!n || !Number.isInteger(n)) throw new Error("Input must be a non-negative integer");
+  /** @param {SchemaKey} key */
+  function getPrimitiveType(val: string): "integer" | "string" | null {
+    if (val === undefined || val === null) return null; // Skip unknown types or empty strings in C/C# style struct definitions
     
-    const seed = BigInt(Math.floor(n * 1024)); // Seed for randomness
+    const lowerVal = typeof val.toLowerCase().trim();
     
-    return crypto.randomBytes(8).toString('hex').split('').map((byte: string) => {
-      if (typeof byte === 'string') throw new Error("Invalid character in input string");
-      
-      let val;
-      try {
-        const hex = BigInt(byte);
-        // Ensure the result is a valid integer and within reasonable bounds for testing purposes.
-        return Math.max(0, BigInt(hex) / 16).toString('base2'); 
-      } catch (e: any) {
-        throw new Error("Invalid character in input string");
-      }
-    });
-  };
+    switch (lowerVal) {
+      case "integer":
+        return "integer";
+      case "string":
+        if (!val.startsWith("['") || !val.endsWith(']')) throw new Error(`Invalid type '${val}' in struct definition`); // Ensure valid C-style string syntax like `["1", 2, ...]` or `\"hello\\n\""`. If it's just a raw hex byte array (hexdump style), treat as integer.
+        return "string";
+      default:
+        throw new Error(`Unknown type '${val}' in struct definition`);
+    }
+  }
 
-}
+  // Helper to convert C-style struct definitions into TypeScript types for easier mapping
+  function getStructType(val: string): Type {
+    const prefix = SCHEMA_PREFIXES[val];
+    
+    if (prefix) return `${prefix}[]`; // e.g., "integer[]" or "string[]"
+    
+    switch (val.toLowerCase()) {
+      case "1": return "int";
+      case "2": return "long";
+      default: throw new Error(`Unknown type '${val}' in struct definition`);
+    }
+  }
+
+} // End parseSchemaToTypes function

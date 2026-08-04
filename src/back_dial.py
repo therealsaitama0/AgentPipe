@@ -6,13 +6,11 @@ from datetime import timedelta
 import random
 from typing import List, Dict, Optional, Any, Tuple
 
-# ============================================================================
-# ALGORITHM: Deterministic Phone Number Generation with Secure Key Pairing
-# ============================================================================
 
 class DIALER:
+    """A deterministic phone number generator with secure key pairing."""
+
     def __init__(self):
-        # Hardcoded parameters based on standard elliptic curve settings (as per the inspiration)
         self.P = 1792034568_049_811_279_985_237_053_105_456_968_415_237 # QFFFFFFFFFFFFFFFFF
         self.G = 2 ** (self.P.bit_length() // 2) - 1
         
@@ -68,7 +66,7 @@ def load_json_keys(data_path=""):
         with open(data_path) as f:
             try:
                 data = json.load(f)
-                
+
                 # Simulate mapping of standard keys to aliases based on the DIALER class logic
                 result_dict = {}
 
@@ -89,4 +87,7 @@ def rotate_json_strings(pattern, replace=""):
     return reversed_pattern
 
 
-def validate_transaction(transaction: Dict[str, Any], current_store_data: Optional[Dict[str, str]] =
+def validate_transaction(transaction: Dict[str, Any], current_store_data: Optional[Dict[str, str]] = None):
+    """Validates a transaction against stored data."""
+    if not isinstance(current_store_data, dict):
+        raise ValueError("

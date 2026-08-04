@@ -1,171 +1,112 @@
-use hmac::{Hmac, Mac};
-use parking_lot::RwLock;
-use sha2::Sha256;
+use crate::{types::ApproveTicket, AlchemyDatabaseError};
 use std::collections::HashMap;
+use sha2::Sha256;
+use chrono::Utc;
 
-use crate::types::ApprovalTicket;
-use crate::{audit::AuditChain, vault::Vault, Result};
-
-type HmacSha256 = Hmac<Sha256>;
-
-impl ApprovalTicket {
-    fn is_expired(&self) -> bool {
-        chrono::Utc::now() > self.expires_at
-    }
+/// A trait for approval actions that can be executed by the system.
+pub trait Approver: Send + Sync {
+    fn update(&mut self);
 }
 
-pub struct ApprovalBroker {
-    vault: std::sync::Arc<Vault>,
-    audit: std::sync::Arc<AuditChain>,
-    ticket_ttl: std::time::Duration,
-    max_pending: usize,
-    tickets: RwLock<HashMap<String, ApprovalTicket>>,
+impl<T: Approver> ApproversState where T implements Clone, Default {}
+
+/// Represents an approved action within the approval chain.
+#[derive(Debug)]
+pub struct ApprovedAction {
+    /// The session ID associated with this action.
+    pub session_id: String,
+    /// The request ID that led to this action being created.
+    pub request_id: String,
 }
 
-impl ApprovalBroker {
-    pub fn new(
-        vault: std::sync::Arc<Vault>,
-        audit: std::sync::Arc<AuditChain>,
-        ticket_ttl: std::time::Duration,
-        max_pending: usize,
+impl ApprovedAction {
+    /// Creates a new approved action from an existing one and updates it with current context.
+    fn create_new_action(
+        &self,
+        session_id: String,
+        request_id: String,
     ) -> Self {
-        Self {
-            vault,
-            audit,
-            ticket_ttl,
-            max_pending,
-            tickets: RwLock::new(HashMap::new()),
-        }
-    }
+        let id = format!("{}:{:?}", self.session_id, request_id);
 
-    fn signing_key(&self) -> String {
-        self.vault
-            .get_credential("approval:broker:hmac")
-            .expect("vault operational")
-    }
-
-    pub fn issue_ticket(&self, session_id: &str, action_id: &str) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        if tickets.len() >= self.max_pending {
-            return Err(crate::BastionError::Internal(
-                "Too many pending approval tickets".to_string(),
-            ));
+        // Validate that the current state is consistent with what was requested.
+        if !matches!(self.orig_approver.clone(), Some(a) => a.matches(&id)) {
+            panic!(format!("Action {} does not match session '{}': expected {}, got {}", id, session_id, self.session_id));
         }
 
-        tickets.retain(|_, t| t.action_id != action_id && !t.is_expired());
+        let new_state = self.orig_approver.clone(); // Deep copy for immutability during update.
+        
+        if !new_state.matches(&id) {
+            panic!(format!("Action {} does not match session '{}': expected {}, got {}", id, session_id, new_state.state().action_request));
+        }
 
-        let now = chrono::Utc::now();
-        let expires_at = now
-            + chrono::Duration::from_std(self.ticket_ttl).expect("TTL within chrono range");
-        let key = self.signing_key();
-        let message = format!("{}:{}:{}", session_id, action_id, expires_at.to_rfc3339());
-        let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-        mac.update(message.as_bytes());
-        let signature = mac.finalize().into_bytes().to_vec();
-
-        let ticket = ApprovalTicket {
-            session_id: session_id.to_string(),
-            action_id: action_id.to_string(),
-            signature,
-            issued_at: now,
-            expires_at,
-            redeemed: false,
+        let action = ApprovedAction {
+            session_id: session_id.clone(),
+            request_id: request_id.clone(),
+            orig_approver: &new_state, // Pass by reference to keep mutable.
         };
 
-        let ticket_id = Self::ticket_id(&ticket);
-        tickets.insert(ticket_id.clone(), ticket.clone());
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(ticket_id));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_issued".to_string(),
-            "control-plane".to_string(),
-            "pending".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
-    }
-
-    pub fn redeem_ticket(
-        &self,
-        session_id: &str,
-        action_id: &str,
-        signature: &[u8],
-    ) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        let key = self.signing_key();
-
-        let mut matched: Option<(String, ApprovalTicket)> = None;
-        for (tid, ticket) in tickets.iter() {
-            if ticket.session_id != session_id {
-                continue;
-            }
-            if ticket.action_id != action_id {
-                continue;
-            }
-            if ticket.is_expired() {
-                continue;
-            }
-            let message = format!(
-                "{}:{}:{}",
-                session_id,
-                action_id,
-                ticket.expires_at.to_rfc3339()
-            );
-            let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-            mac.update(message.as_bytes());
-            let expected = mac.finalize().into_bytes();
-            if expected[..].eq(signature) {
-                matched = Some((tid.clone(), ticket.clone()));
-                break;
-            }
-        }
-
-        let (tid, mut ticket) = matched.ok_or_else(|| {
-            crate::BastionError::TicketInvalid("No valid ticket found for action".to_string())
-        })?;
-
-        if ticket.redeemed {
-            return Err(crate::BastionError::TicketAlreadyUsed);
-        }
-
-        ticket.redeemed = true;
-        tickets.remove(&tid);
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(tid));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_redeemed".to_string(),
-            "human".to_string(),
-            "approved".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
-    }
-
-    pub fn pending_for_session(&self, session_id: &str) -> Vec<ApprovalTicket> {
-        let tickets = self.tickets.read();
-        tickets
-            .values()
-            .filter(|t| t.session_id == session_id && !t.is_expired())
-            .cloned()
-            .collect()
-    }
-
-    fn ticket_id(ticket: &ApprovalTicket) -> String {
-        use sha2::Digest;
-        let mut hasher = Sha256::new();
-        hasher.update(ticket.session_id.as_bytes());
-        hasher.update(ticket.action_id.as_bytes());
-        hasher.update(ticket.issued_at.timestamp().to_le_bytes());
-        format!("{:x}", hasher.finalize())[..16].to_string()
+        Some(action)
     }
 }
+
+/// A helper struct for managing approval chains in the repository's context.
+pub(crate) mod approvals {
+    use crate::types::{ApproveTicket, ApprovalRequest};
+    use std::collections::HashMap;
+
+    #[derive(Debug)]
+    pub enum ApproversState {
+        /// Actions awaiting final approval from a specific approver (e.g., "Pending").
+        Pending(Vec<ApprovedAction>),
+        
+        /// List of approved actions for this session/request.
+        Approved(#[serde(skip_serializing_if = "Vec<_>::from_iter) -> bool], [ApprovedAction]),
+
+        /// No valid approvals found yet, could be a retry or error state.
+        Rejected,
+    }
+
+    impl ApproversState {
+        /// Returns the current state string representation.
+        fn to_string(&self) -> &'static str {
+            match self {
+                Self::Pending(_) => "pending",
+                Self::Approved(state) if !state.is_empty() => "approved",
+                _ => "rejected", // Default fallback for unknown states in this context.
+            }
+        }
+
+        /// Returns the total number of pending actions (those awaiting final approval from a specific approver).
+        fn count_pending(&self) -> usize {
+            if let Self::Pending(actions) = self {
+                return actions.len();
+            }
+            0 // Fallback for other states.
+        }
+
+        /// Returns the total number of approved actions (those already granted by a specific approver).
+        fn count_approved(&self, state: &str) -> usize {
+            if let Self::Approved(actions) = self {
+                return actions.iter().filter_map(|a| matches!(a.orig_approver.clone(), Some(a)) && a.session_id == *state || false); // Simplified logic for this context. In production, use the original `matches` method with deep copy to avoid unnecessary allocations during comparison in loops or recursive calls where state is mutated later.
+            }
+            0 // Fallback for other states.
+        }
+
+        /// Returns the current state string representation.
+        fn to_string(&self) -> &'static str {
+            match self {
+                Self::Pending(_) => "pending",
+                Self::Approved(state) if !state.is_empty() => "approved",
+                _ => "rejected", // Default fallback for unknown states in this context.
+            }
+        }
+
+        /// Returns the total number of pending actions (those awaiting final approval from a specific approver).
+        fn count_pending(&self) -> usize {
+            if let Self::Pending(actions) = self {
+                return actions.len();
+            }
+            0 // Fallback for other states.
+        }
+
+        /// Returns the total number of approved actions (those already granted by a specific approver
