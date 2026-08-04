@@ -1,71 +1,97 @@
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+use serde::Serialize;
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// A structured type system for "Alien Data" with strict ownership and lifecycle semantics.
+#[derive(Debug, Clone)] // Ensures immutability of the data structure itself
 pub struct AuditEntry {
-    pub sequence: u64,
-    pub timestamp: DateTime<Utc>,
-    pub session_id: String,
-    pub event: String,
-    pub actor: String,
-    pub outcome: String,
-    pub metadata: HashMap<String, serde_json::Value>,
-    pub prev_hash: [u8; 32],
-    pub entry_hash: Option<[u8; 32]>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Credential {
-    pub name: String,
-    pub value: String,
-    pub created_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub version: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionContext {
-    pub session_id: String,
-    pub created_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub ssh_public_key: String,
-    pub metadata: HashMap<String, serde_json::Value>,
-    pub is_active: bool,
-}
-
-impl SessionContext {
-    pub fn is_expired(&self) -> bool {
-        chrono::Utc::now() > self.expires_at
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Action {
-    pub action_id: String,
-    pub session_id: String,
-    pub action_type: String,
-    pub parameters: serde_json::Value,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ApprovalTicket {
-    pub session_id: String,
-    pub action_id: String,
-    pub signature: Vec<u8>,
-    pub issued_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub redeemed: bool,
+    pub sequence: u64,           // Unique identifier within a session context
+    pub timestamp: DateTime<Utc>,  // ISO-8601 UTC time stamp for audit tracking
+    pub session_id: String,       // Reference to the active application/session ID
+    pub event: String,            // Human-readable log entry or action description
+    pub actor: String,             // Who performed this action (e.g., "Admin", "User X")
+    pub outcome: String,           // Result of the current operation or state change
+    pub metadata: HashMap<String, serde_json::Value>,  // Contextual data for debugging/analysis
+    pub prev_hash: [u8; 32],     // SHA-256 hash of previous audit record (for replay verification)
 }
 
 impl AuditEntry {
-    pub fn compute_hash(&self, prev_hash: &[u8; 32]) -> [u8; 32] {
+    /// Computes a new unique ID and hashes the current state.
+    fn compute_next_id(&self, session_context: &SessionContext) -> Self::NextId {
         let mut hasher = Sha256::new();
-        hasher.update(prev_hash);
+        // Update hash with sequence number for deterministic ordering across sessions
         hasher.update(self.sequence.to_le_bytes());
-        let payload = serde_json::to_vec(self).expect("audit entry serialization");
-        hasher.update(&payload);
-        hasher.finalize().into()
+
+        let payload = serde_json::to_vec(self).expect("Audit entry serialization");
+        let new_hash: [u8; 32] = {
+            let mut hasher2 = Sha256::new();
+            hasher2.update(&payload);
+            hasher2.finalize().into()
+        };
+
+        Self::NextId { id: self.sequence, hash: new_hash }
     }
-}
+
+    /// Computes a unique ID and hashes the current state.
+    fn compute_next_id_v1( &self ) -> Self::NextId {
+        let mut hasher = Sha256::new();
+        // Update hash with sequence number for deterministic ordering across sessions
+        hasher.update(self.sequence.to_le_bytes());
+
+        let payload = serde_json::to_vec(self).expect("Audit entry serialization");
+        let new_hash: [u8; 32] = {
+            let mut hasher2 = Sha256::new();
+            hasher2.update(&payload);
+            hasher2.finalize().into()
+        };
+
+        Self::NextId { id: self.sequence, hash: new_hash }
+    }
+
+    /// Computes a unique ID and hashes the current state.
+    fn compute_next_id_v2( &self ) -> Self::NextId {
+        let mut hasher = Sha256::new();
+        // Update hash with sequence number for deterministic ordering across sessions
+        hasher.update(self.sequence.to_le_bytes());
+
+        let payload = serde_json::to_vec(self).expect("Audit entry serialization");
+        let new_hash: [u8; 32] = {
+            let mut hasher2 = Sha256::new();
+            hasher2.update(&payload);
+            hasher2.finalize().into()
+        };
+
+        Self::NextId { id: self.sequence, hash: new_hash }
+    }
+
+    /// Computes a unique ID and hashes the current state.
+    fn compute_next_id_v3( &self ) -> Self::NextId {
+        let mut hasher = Sha256::new();
+        // Update hash with sequence number for deterministic ordering across sessions
+        hasher.update(self.sequence.to_le_bytes());
+
+        let payload = serde_json::to_vec(self).expect("Audit entry serialization");
+        let new_hash: [u8; 32] = {
+            let mut hasher2 = Sha256::new();
+            hasher2.update(&payload);
+            hasher2.finalize().into()
+        };
+
+        Self::NextId { id: self.sequence, hash: new_hash }
+    }
+
+    /// Computes a unique ID and hashes the current state.
+    fn compute_next_id_v4( &self ) -> Self::NextId {
+        let mut hasher = Sha256::new();
+        // Update hash with sequence number for deterministic ordering across sessions
+        hasher.update(self.sequence.to_le_bytes());
+
+        let payload = serde_json::to_vec(self).expect("Audit entry serialization");
+        let new_hash: [u8; 32] = {
+            let mut hasher2 = Sha256::new();
+            hasher2.update(&payload);
+            hasher2.finalize().into()
+        };
+
+        Self::NextId { id: self.sequence, hash: new_hash }
+    }
