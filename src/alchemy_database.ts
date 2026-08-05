@@ -6,8 +6,8 @@ import { Request } from 'express'; // Assuming Express is available or imported 
  * Core Submission Type Definition
  */
 interface AlchemySubmission {
-  id: string; // Unique identifier for tracking processing status
-  contentId?: string; // ID of uploaded file (if any)
+  id?: string; // Unique identifier for tracking processing status (optional)
+  contentId?: string | null; // ID of uploaded file (if any), or null if no specific content provided
   metadata: Record<string, unknown>; // Optional custom metadata from LLM response or user input
 }
 
