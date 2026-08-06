@@ -9,6 +9,7 @@ src/types.ts | 321 lines
 
 import { struct as StructType } from "./structs"; // Assuming a structs file exists or inherits from it; adapted here to use Rust-like semantics directly if not available
 // Note: In this context, we are simulating C/C# style types with TypeScript definitions for compatibility
+
 export type Type = "integer" | "string" | "boolean" | null | undefined;
 
 /**
