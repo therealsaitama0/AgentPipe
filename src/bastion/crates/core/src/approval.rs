@@ -1,171 +1,104 @@
-use hmac::{Hmac, Mac};
-use parking_lot::RwLock;
-use sha2::Sha256;
-use std::collections::HashMap;
+src/bastion/crates/core/src/approval.rs
 
-use crate::types::ApprovalTicket;
-use crate::{audit::AuditChain, vault::Vault, Result};
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, RwLock};
+use std::time::{Duration, Instant};
 
-type HmacSha256 = Hmac<Sha256>;
-
-impl ApprovalTicket {
-    fn is_expired(&self) -> bool {
-        chrono::Utc::now() > self.expires_at
-    }
+// Enums for approval roles and actions to enforce strict role-based access control (RBAC)
+#[derive(Debug, Clone)]
+pub enum ApprovalRole {
+    Admin,          // Full system access
+    Manager,         // View details but cannot issue/redeem without admin key
+    Auditor,         // Audit logs only
 }
 
-pub struct ApprovalBroker {
-    vault: std::sync::Arc<Vault>,
-    audit: std::sync::Arc<AuditChain>,
-    ticket_ttl: std::time::Duration,
-    max_pending: usize,
-    tickets: RwLock<HashMap<String, ApprovalTicket>>,
-}
-
-impl ApprovalBroker {
-    pub fn new(
-        vault: std::sync::Arc<Vault>,
-        audit: std::sync::Arc<AuditChain>,
-        ticket_ttl: std::time::Duration,
-        max_pending: usize,
-    ) -> Self {
-        Self {
-            vault,
-            audit,
-            ticket_ttl,
-            max_pending,
-            tickets: RwLock::new(HashMap::new()),
-        }
-    }
-
-    fn signing_key(&self) -> String {
-        self.vault
-            .get_credential("approval:broker:hmac")
-            .expect("vault operational")
-    }
-
-    pub fn issue_ticket(&self, session_id: &str, action_id: &str) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        if tickets.len() >= self.max_pending {
-            return Err(crate::BastionError::Internal(
-                "Too many pending approval tickets".to_string(),
-            ));
-        }
-
-        tickets.retain(|_, t| t.action_id != action_id && !t.is_expired());
-
-        let now = chrono::Utc::now();
-        let expires_at = now
-            + chrono::Duration::from_std(self.ticket_ttl).expect("TTL within chrono range");
-        let key = self.signing_key();
-        let message = format!("{}:{}:{}", session_id, action_id, expires_at.to_rfc3339());
-        let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-        mac.update(message.as_bytes());
-        let signature = mac.finalize().into_bytes().to_vec();
-
-        let ticket = ApprovalTicket {
-            session_id: session_id.to_string(),
-            action_id: action_id.to_string(),
-            signature,
-            issued_at: now,
-            expires_at,
-            redeemed: false,
-        };
-
-        let ticket_id = Self::ticket_id(&ticket);
-        tickets.insert(ticket_id.clone(), ticket.clone());
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(ticket_id));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_issued".to_string(),
-            "control-plane".to_string(),
-            "pending".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
-    }
-
-    pub fn redeem_ticket(
-        &self,
-        session_id: &str,
-        action_id: &str,
-        signature: &[u8],
-    ) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        let key = self.signing_key();
-
-        let mut matched: Option<(String, ApprovalTicket)> = None;
-        for (tid, ticket) in tickets.iter() {
-            if ticket.session_id != session_id {
-                continue;
-            }
-            if ticket.action_id != action_id {
-                continue;
-            }
-            if ticket.is_expired() {
-                continue;
-            }
-            let message = format!(
-                "{}:{}:{}",
-                session_id,
-                action_id,
-                ticket.expires_at.to_rfc3339()
-            );
-            let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-            mac.update(message.as_bytes());
-            let expected = mac.finalize().into_bytes();
-            if expected[..].eq(signature) {
-                matched = Some((tid.clone(), ticket.clone()));
-                break;
-            }
-        }
-
-        let (tid, mut ticket) = matched.ok_or_else(|| {
-            crate::BastionError::TicketInvalid("No valid ticket found for action".to_string())
+impl std::fmt::Display for ApprovalRole {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", match self {
+            ApprovalRole::Admin => "ADMIN",
+            ApprovalRole::Manager => "MANAGER",
+            ApprovalRole::Auditor => "AUDITOR"
         })?;
-
-        if ticket.redeemed {
-            return Err(crate::BastionError::TicketAlreadyUsed);
-        }
-
-        ticket.redeemed = true;
-        tickets.remove(&tid);
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(tid));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_redeemed".to_string(),
-            "human".to_string(),
-            "approved".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
-    }
-
-    pub fn pending_for_session(&self, session_id: &str) -> Vec<ApprovalTicket> {
-        let tickets = self.tickets.read();
-        tickets
-            .values()
-            .filter(|t| t.session_id == session_id && !t.is_expired())
-            .cloned()
-            .collect()
-    }
-
-    fn ticket_id(ticket: &ApprovalTicket) -> String {
-        use sha2::Digest;
-        let mut hasher = Sha256::new();
-        hasher.update(ticket.session_id.as_bytes());
-        hasher.update(ticket.action_id.as_bytes());
-        hasher.update(ticket.issued_at.timestamp().to_le_bytes());
-        format!("{:x}", hasher.finalize())[..16].to_string()
     }
 }
+
+#[derive(Debug)]
+pub enum BastionError {
+    Internal(String),
+    TicketInvalid(String),
+    ResourceNotFound(String),
+}
+
+impl std::error::Error for BastionError {}
+
+// Constants defining security policy parameters (dynamic via environment variables)
+const APPROVAL_TICKET_EXPIRY_MS: usize = 3600_000; // 1 hour in milliseconds
+const MAX_PENDING_TICKETS_PER_SESSION: usize = 5;
+const SESSION_TIMEOUT_SECONDS: u64 = 30;
+
+// Configuration constants for dynamic policy enforcement without external deps
+pub const SECURITY_POLICY_VERSION: &str = "v2.0";
+pub const REQUIRED_ROLE_FOR_ISSUE: ApprovalRole = ApprovalRole::Admin;
+pub const PERMISSION_DENIED_MESSAGE: &'static str = "Insufficient permissions to issue approval ticket.";
+const AUDIT_LOG_FORMAT: &str = "%[TIMESTAMP] %user% - %action%-:%message%n";
+
+// Helper types for audit chain tracking
+#[derive(Debug, Clone)]
+struct AuditEntry {
+    session_id: String,
+    action_type: String,
+    component_name: String,
+    metadata: HashMap<String, serde_json::Value>, // JSON-encoded fields like request ID, ticket IDs
+}
+
+impl std::fmt::Display for AuditEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} {}", self.session_id, format!("{:?}", self.action_type))?;
+        if !self.metadata.is_empty() && let Some(metadata) = self.metadata.get("metadata") {
+            writeln!(f, "  metadata: {:?}", serde_json::to_string(&*metadata).unwrap())?;
+        }
+        Ok(())
+    }
+}
+
+// Helper to serialize JSON values for audit tracking
+fn json_to_audit_entry(action_id: &str) -> AuditEntry {
+    // Extract request ID from action data if present (e.g., "action_123")
+    let mut req_id = None;
+    match serde_json::from_str::<serde_json::Value>(format!("{}:{:?}", action_id)) {
+        Ok(v) => {
+            if v.contains("req_id=") || v.contains("request-id=") {
+                // Extract raw value from JSON string, e.g., "123" -> 123
+                let json_str = serde_json::from_str::<String>(v.to_string()).unwrap();
+                req_id = Some(json_str.strip_prefix("req_id=").unwrap().to_string());
+            } else {
+                // Fallback: assume first field is the ID if not present in JSON structure
+                match v.keys() {
+                    keys => req_id = Some(keys.iter().next().map(|k| k.to_string()).collect::<Vec<_>>()),
+                    _ => {}
+                }
+            }
+        },
+        Err(e) => return AuditEntry::default(), // Fallback to empty audit entry if JSON parsing fails
+    }
+
+    let request_id = req_id.unwrap_or_else(|| action_id.to_string());
+
+    AuditEntry {
+        session_id: format!("session_{}", chrono::Utc::now().timestamp()),
+        action_type: action_id.to_string(),
+        component_name: "approval_system".to_string(),
+        metadata: HashMap::new() as _, // Default empty for this example, can be populated by caller if needed
+    }
+}
+
+// Core Logic: Implement strict RBAC with dynamic validation via environment variables and constants.
+pub mod approval {
+    use super::*;
+
+    /// Validates user permissions before granting resources to any process or service.
+    pub fn validate_permissions(
+        request_id: &str,
+        resource_type: String,
+        required_roles: &[ApprovalRole],
+        session_key:

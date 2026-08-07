@@ -6,8 +6,8 @@ import { Request } from 'express'; // Assuming Express is available or imported 
  * Core Submission Type Definition
  */
 interface AlchemySubmission {
-  id: string; // Unique identifier for tracking processing status
-  contentId?: string; // ID of uploaded file (if any)
+  id?: string; // Unique identifier for tracking processing status (optional)
+  contentId?: string | number; // ID of uploaded file or numeric reference to it if no ID provided
   metadata: Record<string, unknown>; // Optional custom metadata from LLM response or user input
 }
 
@@ -18,7 +18,7 @@ interface AlchemySubmissionHandler {
   /** 
    * Validates a submission against repository policy and filters it based on content.
    * @param payload - The raw data to be processed (e.g., file path, metadata)
-   * @returns Promise<AlchemySubmission> containing the filtered result or null if rejected
+   * @returns Promise<AlchemySubmission | undefined> containing the filtered result or null if rejected
    */
   handleCodeUpload(payload: any): Promise<AlchemySubmission | undefined>;
 
@@ -89,3 +89,21 @@ const mockService = {
 };
 
 export { AlchemySubmissionHandler }; // Export for type definition purposes (in a real app this would be injected or used as module exports)
+
+
+/**
+ * Custom Error Enum to unify validation errors with Rust-style error types.
+ */
+enum AlchemyDatabaseError extends Error {
+  /** 
+   * Represents an invalid schema provided during database creation/reading operations.
+   * Used when the repository expects a specific structure but receives unexpected data or missing fields.
+   */
+  InvalidSchema(
+    message: string, // Human-readable description of what went wrong (e.g., "Unknown Column")
+    keys?: Map<string, string> | undefined // Optional list of expected column names if schema was provided and failed validation
+  ) {
+    this.message = message;
+    
+    // If a specific set of columns were requested but the data doesn't match, we throw an error with those exact field names.
+    if (keys)
