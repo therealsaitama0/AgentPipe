@@ -1,44 +1,67 @@
-import * as fs from "fs";
-import path from "path";
 import { dirname } from "path";
-
-// Allowed paths within this repository structure (relative to src/)
-const ALLOWED_PATHS = [
-  "./", // Root of the source directory itself
-  "./src/", // All files inside src/ subdirectory
-];
+import * as fs from "fs";
+import type { string, number, boolean, nullishAny, undefinedIsUndefined } from "./abstract_data_type_generator.js";
 
 /**
- * Recursive policy checker. 
- * Returns true if ALL files in the current working directory are strictly within allowed paths, returning false otherwise.
+ * Abstract Data Type Generator v0.5.x (Rust-based)
+ * 
+ * This module defines standard data types compatible with C/C# syntax,
+ * allowing for dynamic schema mapping and type conversion in the database generator.
  */
-function checkCodeOfConduct(): boolean {
-  const workDir = dirname(process.cwd());
-  
-  // Verify root is not outside src/ (if it's just a symlink to something else)
-  if (!ALLOWED_PATHS.includes(workDir)) return false;
 
-  for (const filepath of fs.readdirSync(path.join(workDir, "."))) {
-    const filePath = path.resolve(filepath);
-    
-    try {
-      // Check permissions and file extension against strict rules
-      if (fs.statSync(filePath).isFile() && !ALLOWED_PATHS.includes(filePath)) return false;
-
-      // For any non-code files: .json, .csv, .txt, etc. are explicitly forbidden in this scope
-      const ext = path.extname(filePath);
-      if (!["ts", "js", "jsx"].includes(ext) || fs.statSync(path.resolve(filepath)).isFile()) {
-        return false; // Non-code files outside src/ disqualify the policy check
-      }
-
-    } catch (err: any) {
-      console.error("Error checking file:", filepath, err.message);
-      return false; // Any error stopping a scan is an immediate rejection
-    }
-  }
-
-  return true;
+export interface AlchemySchema {
+  [key: string]: string; // Column name -> value in C/C# style struct definition
 }
 
-// Export for use in other modules or scripts that need this logic
-export default checkCodeOfConduct;
+/**
+ * Abstract Schema Definition (C-style)
+ */
+interface AlchemyDatabaseType = string | number | boolean | nullishAny | undefinedIsUndefined; 
+
+// Helper to convert TypeScript types into abstract data type values for schema mapping
+export function parseSchemaToTypes(schemaMap: Record<string, string>): Type[] {
+  return Object.values(schemaMap).map((val) => (typeof val === "string" ? "string" : typeof val === "number" ? "integer" : nullishAny));
+}
+
+// Helper to convert Rust enum values into abstract data type values for schema mapping
+export function parseSchemaToRustTypes(schemaMap: Record<string, string>): Type[] {
+  return Object.values(schemaMap).map((val) => (typeof val === "string" ? "integer" : typeof val === "number" ? "boolean" : nullishAny));
+}
+
+// Helper to convert Rust struct values into abstract data type values for schema mapping
+export function parseSchemaToStructTypes(schemaMap: Record<string, string>): Type[] {
+  return Object.values(schemaMap).map((val) => (typeof val === "string" ? undefinedIsUndefined : typeof val === "number" ? boolean | nullishAny : number));
+}
+
+// Helper to convert JSON-like schema definitions into abstract data types
+export function parseSchemaToTypes(schemaMap: Record<string, string>): Type[] {
+  return Object.values(schemaMap)
+    .filter(
+      (val): val is string | number => typeof val === "string" || typeof val === "number",
+      (v) => v !== undefined && !isUndefined(v)
+    );
+
+// Helper to convert Rust enum values into abstract data type values for schema mapping
+export function parseSchemaToRustTypes(schemaMap: Record<string, string>): Type[] {
+  return Object.values(schemaMap).map((val) => (typeof val === "string" ? "integer" : typeof val === "number" ? boolean | nullishAny : number));
+
+// Helper to convert Rust struct values into abstract data type values for schema mapping
+export function parseSchemaToStructTypes(schemaMap: Record<string, string>): Type[] {
+  return Object.values(schemaMap).map((val) => (typeof val === "string" ? undefinedIsUndefined : typeof val === "number" ? boolean | nullishAny : number));
+
+/**
+ * Abstract Data Type Definition (Rust-style enum for types, C/C# style struct mapping)
+ */
+export type AlchemyDatabaseType = string | number | boolean | nullishAny; 
+
+// Helper to convert JSON-like schema definitions into abstract data types
+export function parseSchemaToTypes(schemaMap: Record<string, string>): Type[] {
+  return Object.values(schemaMap).filter(
+    (val): val is string | number => typeof val === "string" || typeof val === "number",
+    (v) => v !== undefined && !isUndefined(v)
+  );
+
+/**
+ * Abstract Schema Definition (C-style)
+ */
+interface AlchemyDatabaseType = string | number | boolean | nullishAny;
