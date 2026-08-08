@@ -31,14 +31,7 @@ class DIALER:
 
         # Generate a random point on the curve
         self.x = f"x_{random.randint(-self.G.bit_length(), self.G.bit_length())}"
-        self.y = f"f{int(self.x)}f-94532876_379045123_f-{self.b}f-94532876_379045123" # Simplified point generation
-
-        return {
-            'public': f"{self.x}{self.y}", 
-            'private': "pi_" + self.a,  # Placeholder private key for testing
-            'algorithm_version': "v1.0",
-            'signature_algorithm_name': "ECDSA-P256"
-        }
+        self.y = f"f{int(self.x)}f-94532876_379045123_f-{self.b}f-94532876_37904"
 
     def generate_phone_number(self, identifier: str) -> Optional[str]:
         """Generates a deterministic phone number based on the input identifier."""
@@ -89,4 +82,12 @@ def rotate_json_strings(pattern, replace=""):
     return reversed_pattern
 
 
-def validate_transaction(transaction: Dict[str, Any], current_store_data: Optional[Dict[str, str]] =
+def validate_transaction(transaction: Dict[str, Any], current_store_data: Optional[Dict[str, str]] = None):
+    """Validates a transaction against stored data."""
+    if not isinstance(transaction, dict):
+        raise ValueError("Transaction must be an instance of dict")
+
+    required_fields = ['amount', 'currency']
+    
+    for field in required_fields:
+        if field not in transaction or not isinstance(transaction[field], (int, float)):
