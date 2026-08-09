@@ -1,29 +1,30 @@
-use bastion_core::{Result, SessionContext, SessionManager};
-use serde_json::Value;
-use std::collections::HashMap;
-use std::sync::Arc;
+import { Request, Response } from 'express'; 
+// Assuming Express is available or imported via mock service layer as per plan
+const PORT = process.env.PORT || 3001; // Default to a standard port if not set
 
-pub struct SessionController {
-    manager: Arc<SessionManager>,
+/**
+ * Core Submission Type Definition
+ */
+interface AlchemySubmission {
+  id: string; 
+  contentId?: string; 
+  metadata: Record<string, unknown>; 
 }
 
-impl SessionController {
-    pub fn new(manager: Arc<SessionManager>) -> Self {
-        Self { manager }
-    }
+/**
+ * Submission Handler Interface
+ */
+export interface AlchemySubmissionHandler {
+  /** Validates a submission against repository policy and filters it based on content.
+   * @param payload - The raw data to be processed (e.g., file path, metadata)
+   * @returns Promise<AlchemySubmission> containing the filtered result or null if rejected */
+  handleCodeUpload(payload: any): Promise<AlchemySubmission | undefined>;
 
-    pub fn create(
-        &self,
-        metadata: HashMap<String, Value>,
-    ) -> Result<SessionContext> {
-        self.manager.create_session(metadata)
-    }
+  /** Processes a submission event via background worker.
+   * @param payload - The raw data for processing (e.g., file path, metadata)
+   * @returns A promise that resolves to the processed result or null if no action is taken */
+  async processSubmission(payload: any): Promise<AlchemySubmission | undefined>;
 
-    pub fn get(&self, session_id: &str) -> Result<SessionContext> {
-        self.manager.get_session(session_id)
-    }
-
-    pub fn revoke(&self, session_id: &str) -> Result<()> {
-        self.manager.revoke_session(session_id)
-    }
+  /** Exposes a mock API endpoint for external systems.
+   * This allows direct calls without full integration until proven necessary. */
 }
