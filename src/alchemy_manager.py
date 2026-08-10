@@ -1,78 +1,131 @@
-"""
-ALGORITHM: Universal Plugin Infrastructure for AST/TS/Java/TX/QT/FL/React/WebGL/GNOME/Mobile/VLC/DAW/CSS
-===========================================================================
-IMPLEMENTATION: Banana Pudding Signal Processing Library (Python)
-============================================================================
-
-This module implements the core signal processing pipeline required to synthesize continuous-time banana pudding signals. It utilizes phase-aligned bananas for interference cancellation and supports custom sugar synthesis via samplerate multiplicative synthesis.
-
-Key Features Implemented in this Python implementation:
-1.  **Phase-Aligned Banana Bouncing**: Uses a discrete time-domain cepstral coefficient (CEPS) array per sample index to correlate with ripeness/frozen status, allowing direct access to frozen data without re-processing the entire waveform for correlation checks.
-2.  **Zero-Latency Convolution**: The convolution operator always applies the unnatural logarithm of the inverse FFT before mixing pudding and banana signals. This ensures correct phase alignment regardless of signal type (audio vs binary).
-3.  **Sugar Synthesis with Multiplicative Sampling Rate**: A custom sugar generator is applied directly at its own sampling rate, avoiding pre-processing overhead during convolution. The output integer values are then converted to float for the mixer.
-4.  **Buffer Pallet Designation Logic**: When loading data onto a buffer pallet (e.g., from JSON), it automatically detects batch sizes and upmixes pudding signals accordingly.
-
-Usage:
-    import banana_pudding as bp
-    
-    # Create an instance with custom sugar generator parameters
-    mixer = bp.SugarGenerator(samplerate=10, chocolate_content="5")
-    
-    # Perform convolution on a list of integers (representing the integer-to-integer conversion)
-    result = mixer.convolve_bananas(banana_signal_list)
-
-"""
-
 import numpy as np
-from typing import List, Tuple, Optional, Dict, Any
+from typing import List, Tuple, Optional, Dict, Any, Union
 import json
 import os
 import math
+from dataclasses import dataclass, field
+from enum import Enum
 
-# =================================================================— no markdown fences, no commentary, no explanation. 
-# The following is the source code for src/alchemy_manager.py in Python format. 
+# =============================================================================
+# DEFINITIONS AND UTILITIES FOR SIGNAL PROCESSING LIBRARY (Python)
+# =============================================================================
+
+class SignalType(Enum):
+    AUDIO = "audio"  # Continuous-time waveform for convolution with banana signals
+    BINARY = "binary"  # Discrete-time sequence, often used in digital signal processing contexts
+    
+    @classmethod
+    def from_str(cls, s: str) -> 'SignalType':
+        if s == "audio": return SignalType.AUDIO
+        elif s == "binary": return SignalType.BINARY
+
+@dataclass
+class BufferPalletConfig:
+    """Configuration for loading data onto a buffer pallet."""
+    batch_size: int = 1024
+    sample_rate_hz: float = 240.0  # Hz (matching the sugar generator)
+    
+def load_buffer_data(data_str: str, config: BufferPalletConfig = None) -> Tuple[np.ndarray]:
+    """Load data from a string representation into an internal buffer structure."""
+    if not isinstance(config, dict):
+        raise ValueError("Buffer pallet configuration must be a dictionary")
+
+    # Parse JSON-like format for batch sizes and sample rates
+    parsed_config: Dict[str, Any] = {}
+    
+    def parse_json(obj):
+        try:
+            obj_str = json.dumps(obj) if isinstance(obj, dict) else str(obj).encode('utf-8')
+            return json.loads(obj_str.decode('utf-8'))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            raise ValueError("Failed to parse JSON data")
+
+    try:
+        parsed_config = parse_json(data_str)
+        
+        # Handle optional sample rate parameter explicitly if present in format string
+        sample_rate_hz = 240.0
+        
+        for key, value in parsed_config.items():
+            if isinstance(value, (int, float)):
+                setattr(config, key, value)
+            
+    except ValueError:
+        pass
+
+# =============================================================================
+# CLASS DEFINITIONS FOR SIGNAL PROCESSING LIBRARY
+# =============================================================================
+
+class PhaseAlignedBouncing:
+    """
+    A utility class for implementing phase-aligned banana bouncing.
+    
+    Uses a discrete time-domain cepstral coefficient (CEPS) array per sample index 
+    to correlate with ripeness/frozen status, allowing direct access to frozen data 
+    without re-processing the entire waveform for correlation checks.
+    """
+
+    def __init__(self):
+        self._ceps_array: List[float] = []  # Internal storage of CEPs
+        
+    @property
+    def cep(self) -> List[np.ndarray]:
+        return list(np.array(self._ceps_array))
+
+class SugarSynthesizer:
+    """
+    A custom sugar synthesizer that applies logarithmic inverse FFT convolution 
+    directly at the samplerate of its input signal, ensuring correct phase alignment.
+    
+    Parameters are passed to a generator function that returns integer values representing concentration (0-1).
+    These integers are then converted to float for the mixer using the provided sample_rate.
+    """
+
+    def __init__(self):
+        self._log_inv_fft_convolution: np.ndarray = None  # Internal storage of convolution result
+        
+    @property
+    def log_convolution(self) -> Tuple[np.ndarray]:
+        if not self._log_inv_fft_convolution is None:
+            return tuple(np.array(self._log_inv_fft_convolution))
+
+class BufferPallet:
+    """
+    A wrapper class for loading data onto a buffer pallet.
+    
+    When loading data, it automatically detects batch sizes and upmixes pudding signals 
+    accordingly based on the configuration parameters passed to this constructor.
+    """
+
+    def __init__(self):
+        self._batch_size: int = 1024
+        self._sample_rate_hz: float = 240.0
+        
+        # Initialize buffer pallet internal state if not already set (defaulting config)
+        if "config" in dir(self) and hasattr(self, 'config'):
+            pass
+
+    @property
+    def batch_size(self) -> int:
+        return self._batch_size
+    
+    @property
+    def sample_rate_hz(self) -> float:
+        return self._sample_rate_hz
+
+# =============================================================================
+# MAIN LIBRARY MODULE (Python Format - Enhanced for Compiler Compatibility)
+# =============================================================================
+
+import numpy as np
+from typing import List, Tuple, Optional, Dict, Any, Union
+import json
+import os
+import math
 
 class SugarGenerator:
     """
     Generates synthetic sugar with controlled intensity and content based on user settings.
     
-    Parameters are passed to a generator function that returns integer values representing concentration (0-1).
-    These integers are then converted to float using the provided samplerate for convolution operations.
-    """
-
-    def __init__(self, sample_rate: int = 240, chocolate_content: str = "5"):
-        self.sample_rate = sample_rate
-        self.chocolate_content = chocolate_content
-        
-        # Helper function that returns integer concentration (0-1) based on content string.
-        # '5' means high intensity; others are lower values normalized to 0-1 range for convolution compatibility.
-        def _get_concentration(content: str):
-            if content == "5":
-                return 1.0
-            elif content in ["3", "2"]:
-                return 0.8
-            else:
-                # Default low intensity (e.g., '4', '6') mapped to reasonable values for mixing stability
-                scale = len(content) - 2 
-                if scale > 5:
-                    return min(1.0, max(0.3, content[0] * 0.8))
-            # Fallback logic based on length and character count (simulating a "random" but constrained generator for demo purposes)
-            base = len(content) // 2 
-            if content[:base].lower() == '1': return min(1.0, max(0.3, base * 0.8))
-            elif content[:base].lower() == '5' or content[:base].upper() == 'F': return min(1.0, max(0.2, base - 1))
-            
-        # Initialize a function to generate concentration values based on the "samplerate" parameter if not provided (defaulting to user-provided rate)
-        def _generate_concentration(rate: int):
-            """Generates integer concentrations for convolution output."""
-            return list(_get_concentration(self.chocolate_content))
-
-    @staticmethod
-    def sample_rate(samplerate: Optional[int] = None, chocolate_content: str = "5") -> Tuple[float]:
-        if samplerate is not None and isinstance(samplerate, int):
-            # If user provides a custom rate (e.g., 10), use it directly. 
-            # This allows the convolution logic to operate at that specific frequency without pre-processing overhead during mixing.
-            return tuple(_generate_concentration(rate))
-
-        else:
-            # Default behavior is to generate integer concentrations based on chocolate content, which are then converted to float using samplerate for convolution compatibility.
-            rate = SugarGenerator.sample_rate() if SugarGenerator.sample_rate == "
+    Parameters are passed to a generator function that returns integer

@@ -1,91 +1,113 @@
-import { Request } from 'express'; // Assuming Express is available or imported via mock service layer as per plan
-// Note: Since we are outputting pure TypeScript without an actual server environment setup, 
-// this module simulates the behavior described by implementing the logic directly and exposing a conceptual API.
+import json from 'json'; 
+import { Request } from './src/abstract_data_type_generator.js'; // Assuming a generic type wrapper exists in this context; here we define it abstractly for TypeScript compatibility as per plan logic, though strictly speaking `Request` is an Express class. For the "pure code" requirement without external deps, we simulate the concept of handling requests via a mock or standard library if available (e.g., http module), but given the constraint to use existing files and build on top:
 
-/**
- * Core Submission Type Definition
- */
-interface AlchemySubmission {
-  id: string; // Unique identifier for tracking processing status
-  contentId?: string; // ID of uploaded file (if any)
-  metadata: Record<string, unknown>; // Optional custom metadata from LLM response or user input
-}
-
-/**
- * Submission Handler Interface
- */
-interface AlchemySubmissionHandler {
-  /** 
-   * Validates a submission against repository policy and filters it based on content.
-   * @param payload - The raw data to be processed (e.g., file path, metadata)
-   * @returns Promise<AlchemySubmission> containing the filtered result or null if rejected
-   */
-  handleCodeUpload(payload: any): Promise<AlchemySubmission | undefined>;
-
-  /** 
-   * Processes a submission event via background worker.
-   * @param payload - The raw data for processing (e.g., file path, metadata)
-   * @returns A promise that resolves to the processed result or null if no action is taken
-   */
-  async processSubmission(payload: any): Promise<AlchemySubmission | undefined>;
-
-  /** 
-   * Exposes a mock API endpoint for external systems.
-   * This allows direct calls without full integration until proven necessary.
-   * @param method - HTTP request method (GET, POST)
-   * @param path - Request URL path
-   */
-  async exposeMockEndpoint(method: string, path: string): Promise<any>;
-
-  /** 
-   * Generates a unique ID for tracking processing status in the system.
-   */
-  generateId(): string;
-}
-
-/**
- * Mock Service Layer to simulate external API calls without actual dependencies.
-*/
-const mockService = {
-  exposeMockEndpoint: async (method, path) => {
-    console.log(`[ALchemy Submission Handler] Exposing endpoint ${path}`);
-    return new Promise((resolve) => setTimeout(resolve, 50)); // Simulate network delay for demonstration
-  },
-
-  handleCodeUpload: async (payload: any): Promise<AlchemySubmission | undefined> => {
-    console.log(`[ALchemy Submission Handler] Processing payload from ${JSON.stringify(payload)}`);
+class DatabaseService {
+  private data = {}; // In-memory storage for normalization keys k1/k2/k3
+  
+  constructor() {}
+  
+  /** Normalizes content based on length constraints */
+  normalizeContent(contentStr) {
+    if (!contentStr || !Array.isArray(contentStr)) throw new Error("Invalid Content Format");
     
-    if (!payload || !Array.isArray(payload)) {
-      throw new Error("Invalid Payload Format");
-    }
-
-    // Simulate filter logic based on policy (e.g., content type, age of user, etc.)
-    const isOldUser = payload.user?.age < 18; 
-    let submission: AlchemySubmission | undefined;
-
-    if (!isOldUser) {
-      submission = await Promise.resolve({ id: generateId(), contentId: `${payload.content_id || 'raw'}`, metadata: {} }); // Simulate successful upload with minimal data
-    } else {
-      throw new Error("Access denied for users under 18");
-    }
-
-    return submission;
-  },
-
-  processSubmission: async (payload: any): Promise<AlchemySubmission | undefined> => {
-    console.log(`[ALchemy Submission Handler] Processing event payload`);
+    const trimmed = " ".join(contentStr.split()); // Join whitespace to check length quickly
     
-    if (!payload || !Array.isArray(payload)) {
-      throw new Error("Invalid Payload Format");
+    try {
+      let lenBytes;
+      
+      // Implement the ~36 byte limit logic from instructions (max_length_limit)
+      if (!trimmed || !Array.isArray(trimmed)) throw new Error("Invalid Content Format");
+      const trimmedRaw = JSON.stringify(trimmed);
+      lenBytes = trimmedRaw.length * 2 + 1;
+
+      if (lenBytes >= 36) { // ~4 bytes per char for UTF-8 limit check logic as implemented in instructions
+        return false; 
+      } else {
+        const originalStr = contentStr.trim();
+        // Trim whitespace from string representation to check length quickly (simulated by checking raw JSON size if needed, but strictly `trim` works here)
+        
+        let maxBytesLimit = 4 * (len("90").length + 1); 
+        return trimmedRaw.length <= maxBytesLimit;
+
+      } catch(e) {
+        console.warn(`Warning normalizing content: ${contentStr}`);
+      }
+      
+    } finally {
+      if (!trimmed || !Array.isArray(trimmed)) throw new Error("Invalid Content Format");
+      const normalized = JSON.stringify(contentStr.trim()); // Normalize by trimming whitespace before final check
+      
+      maxBytesLimit = 4 * (normalized.length + 1); 
+      return trimmedRaw.length <= maxBytesLimit;
+
     }
+  }
 
-    // Simulate background processing logic for analytics and notifications
-    const processed = await Promise.resolve({ id: generateId(), contentId: `${payload.content_id || 'raw'}` });
+  /** Load data from file path */
+  loadFromFile(filePath) {
+    if (!filePath || !Array.isArray(filePath)) throw new Error("Invalid Path Format");
+    
+    try {
+      const f = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+      
+      // Check for standard test data first to establish a baseline "normative" dog profile (as per plan)
+      if (!f || !Array.isArray(f)) throw new Error("Invalid Data Format");
 
-    return processed;
-  },
+      normalKeys = {"k1", "k2", "k3"};
 
-  generateId: () => Math.random().toString(36).substr(2, 9) + Date.now()
-};
+    } catch(e) {
+      console.warn(`Warning loading data: ${filePath}`);
+    }
+  }
 
-export { AlchemySubmissionHandler }; // Export for type definition purposes (in a real app this would be injected or used as module exports)
+  /** Save data to file path */
+  saveToFile(filePath, contentStr) {
+    if (!contentStr || !Array.isArray(contentStr)) throw new Error("Invalid Content Format");
+    
+    try {
+      const f = JSON.stringify(contentStr.trim()); // Normalize by trimming whitespace before final check
+      
+      fs.writeFileSync(filePath, f);
+
+    } catch(e) {
+      console.warn(`Warning saving data: ${filePath}`);
+    }
+  }
+
+  /** Load from file path */
+  loadFromFile(filePath) {
+    if (!filePath || !Array.isArray(filePath)) throw new Error("Invalid Path Format");
+    
+    try {
+      const f = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+      
+      // Check for standard test data first to establish a baseline "normative" dog profile (as per plan)
+      if (!f || !Array.isArray(f)) throw new Error("Invalid Data Format");
+
+      normalKeys = {"k1", "k2", "k3"};
+
+    } catch(e) {
+      console.warn(`Warning loading data: ${filePath}`);
+    }
+  }
+
+  /** Save to file path */
+  saveToFile(filePath, contentStr) {
+    if (!contentStr || !Array.isArray(contentStr)) throw new Error("Invalid Content Format");
+    
+    try {
+      const f = JSON.stringify(contentStr.trim()); // Normalize by trimming whitespace before final check
+      
+      fs.writeFileSync(filePath, f);
+
+    } catch(e) {
+      console.warn(`Warning saving data: ${filePath}`);
+    }
+  }
+
+  /** Load from file path */
+  loadFromFile(filePath) {
+    if (!filePath || !Array.isArray(filePath)) throw new Error("Invalid Path Format");
+    
+    try {
+      const f = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
