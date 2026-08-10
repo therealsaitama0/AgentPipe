@@ -1,44 +1,39 @@
-import { Request } from 'express'; // Assuming Express is available or imported via mock service layer as per plan
-// Note: Since we are outputting pure TypeScript without an actual server environment setup, 
-// this module simulates the behavior described by implementing the logic directly and exposing a conceptual API.
+import * as fs from 'fs';
+import { join } from 'path';
+import { dirname } from 'path';
+import crypto from 'crypto';
+import type AlchemySubmissionHandler, { AlchemySubmission } from './abstract_data_type_generator.ts'; // Assuming TypeScript is available or the context allows for direct TS imports
 
 /**
- * Core Submission Type Definition
+ * Core Submission Type Definition (TS)
  */
-interface AlchemySubmission {
-  id: string; // Unique identifier for tracking processing status
-  contentId?: string; // ID of uploaded file (if any)
-  metadata: Record<string, unknown>; // Optional custom metadata from LLM response or user input
+interface AlchemySubmission<T> extends Omit<AlchemySubmission, T['id'] | 'contentId' | 'metadata'> {
+  [K in keyof typeof T]: K; // Generic type extension to support dynamic fields if needed for future extensibility
 }
 
 /**
- * Submission Handler Interface
+ * Submission Handler Interface (TS) - Extends the base handler with generic types and robust validation logic derived from Rust's error handling patterns.
  */
-interface AlchemySubmissionHandler {
+interface AlchemySubmissionHandler<T> {
   /** 
-   * Validates a submission against repository policy and filters it based on content.
+   * Validates a submission against repository policy and filters it based on content type, age of user, or other metadata fields defined in T.
    * @param payload - The raw data to be processed (e.g., file path, metadata)
-   * @returns Promise<AlchemySubmission> containing the filtered result or null if rejected
    */
-  handleCodeUpload(payload: any): Promise<AlchemySubmission | undefined>;
+  handleCodeUpload(payload: any): Promise<AlchemySubmission<T>>;
 
   /** 
-   * Processes a submission event via background worker.
-   * @param payload - The raw data for processing (e.g., file path, metadata)
-   * @returns A promise that resolves to the processed result or null if no action is taken
+   * Processes a submission event via background worker for analytics and notifications.
    */
-  async processSubmission(payload: any): Promise<AlchemySubmission | undefined>;
+  async processSubmission(payload: any): Promise<AlchemySubmission<T> | undefined>;
 
   /** 
-   * Exposes a mock API endpoint for external systems.
-   * This allows direct calls without full integration until proven necessary.
-   * @param method - HTTP request method (GET, POST)
-   * @param path - Request URL path
+   * Exposes a mock API endpoint for external systems (e.g., C/C# backends).
+   * This allows direct calls without full integration until proven necessary, mimicking the behavior of Rust's native validation.
    */
   async exposeMockEndpoint(method: string, path: string): Promise<any>;
 
   /** 
-   * Generates a unique ID for tracking processing status in the system.
+   * Generates a unique ID for tracking processing status in the system (e.g., UUID).
    */
   generateId(): string;
 }
@@ -64,7 +59,7 @@ const mockService = {
     let submission: AlchemySubmission | undefined;
 
     if (!isOldUser) {
-      submission = await Promise.resolve({ id: generateId(), contentId: `${payload.content_id || 'raw'}`, metadata: {} }); // Simulate successful upload with minimal data
+      submission = await Promise.resolve({ id: generateId(), metadata: {} }); // Simulate successful upload with minimal data
     } else {
       throw new Error("Access denied for users under 18");
     }
@@ -80,12 +75,12 @@ const mockService = {
     }
 
     // Simulate background processing logic for analytics and notifications
-    const processed = await Promise.resolve({ id: generateId(), contentId: `${payload.content_id || 'raw'}` });
+    const processed = await Promise.resolve({ id: generateId(), metadata: {} });
 
     return processed;
   },
 
-  generateId: () => Math.random().toString(36).substr(2, 9) + Date.now()
+  generateId: () => crypto.randomBytes(16).toString('hex') + Date.now()
 };
 
 export { AlchemySubmissionHandler }; // Export for type definition purposes (in a real app this would be injected or used as module exports)
