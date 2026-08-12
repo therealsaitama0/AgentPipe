@@ -1,5 +1,3 @@
-src/alchemy_database.rs
-```rust
 use std::fs;
 use std::io::{self, Write};
 use anyhow::{Result, Context};
@@ -52,7 +50,6 @@ impl Default for AlchemyDatabaseError {
 }
 
 /// Trait defining the interface for an abstract database that supports SQL query patterns. 
-/// Used to generate code generation logic and reflection on metadata (SQLite driver).
 pub trait AlchemyDatabase {
     /// Generate a C/C# type definition string based on this DB's schema structure if available, or return empty/None if not applicable.
     fn get_schema_type(&self) -> Option<String> {
