@@ -1,5 +1,19 @@
+import type AlchemyDatabaseType from "./abstract_data_type_generator.ts"; // Type alias for consistency with Rust enum semantics in TypeScript context
+
 /**
- * Abstract Data Type Generator Class with LaTeX Support
+ * Abstract Schema Definition (C-style)
+ */
+interface AlchemySchema {
+  [key: string]: string; // Column name -> value in C/C# style struct definition
+}
+
+// Helper to convert C-style struct definitions into TypeScript types for easier mapping
+export function schemaToType(schemaMap: AlchemySchema): Type[] {
+  return Object.values(schemaMap).map((val) => (typeof val === "string" ? "string" : typeof val === "number" ? "integer" : null));
+}
+
+/**
+ * Abstract Data Definition Generator Class with LaTeX Support
  * Generates any arbitrary integer without side effects or recursion limits.
  * Supports a custom LaTeX engine compatible with TexLive by implementing its core components directly in TypeScript/JavaScript (no external libraries).
  */

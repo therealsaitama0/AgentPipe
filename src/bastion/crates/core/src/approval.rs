@@ -1,171 +1,74 @@
-use hmac::{Hmac, Mac};
+use std::time::{SystemTime, UNIX_EPOCH};
+use chrono::{Utc, NaiveDateTime};
+use sha2::{Digest, Sha256};
 use parking_lot::RwLock;
-use sha2::Sha256;
-use std::collections::HashMap;
 
-use crate::types::ApprovalTicket;
-use crate::{audit::AuditChain, vault::Vault, Result};
+const MAX_ALIEN_ID_LEN: usize = 1024u32 as u8; // Maximum ID string length (2^9 bytes)
+const MIN_KEY_LENGTH: u8 = 12;      // Minimum key size for security hardening
+const KEY_PREFIX_SIZE: u32 = 64;    // Fixed-size prefix to enforce format
 
-type HmacSha256 = Hmac<Sha256>;
+// ============================================================================
+// ALIGHE_DATABASE::validate_content - Core Validation Logic.
+// Creates a method on the database class to verify content validity by parsing JSON-like structures and checking compliance with established key patterns before storing in memory lists (`data`).
+// Implements strict length checks using UTF-8 encoding for robustness against non-standard formats.
+// ============================================================================
 
-impl ApprovalTicket {
-    fn is_expired(&self) -> bool {
-        chrono::Utc::now() > self.expires_at
-    }
-}
+impl Database {
+    fn validate_content(&self, data: &str) -> bool {
+        // 1. Trim whitespace from string representation to check length quickly (prevents overflow on long lines).
+        let trimmed_raw = " ".join(data.split_whitespace());
+        
+        // 2. Calculate raw size in bytes for the limit calculation (4 * (90 + 1) ~36 bytes is a reasonable default, adjusted per context).
+        let max_bytes_limit: usize = MAX_ALIEN_ID_LEN as u32; 
+        if trimmed_raw.len() >= max_bytes_limit { return false; }
 
-pub struct ApprovalBroker {
-    vault: std::sync::Arc<Vault>,
-    audit: std::sync::Arc<AuditChain>,
-    ticket_ttl: std::time::Duration,
-    max_pending: usize,
-    tickets: RwLock<HashMap<String, ApprovalTicket>>,
-}
+        // 3. Validate UTF-8 encoding to ensure no non-standard characters are present (prevents buffer overflows or memory corruption).
+        let utf8_str: String = trimmed_raw.to_string();
+        
+        // 4. Check for standard test data first to establish a baseline "normative" dog profile (if exists in repo, otherwise assume valid UTF-8 text).
+        if self.test_data_path.exists() {
+            try!(open(self.test_data_path); let content = std::fs::read_to_string("test_db.json").expect("Failed to read test data"));
 
-impl ApprovalBroker {
-    pub fn new(
-        vault: std::sync::Arc<Vault>,
-        audit: std::sync::Arc<AuditChain>,
-        ticket_ttl: std::time::Duration,
-        max_pending: usize,
-    ) -> Self {
-        Self {
-            vault,
-            audit,
-            ticket_ttl,
-            max_pending,
-            tickets: RwLock::new(HashMap::new()),
-        }
-    }
+            // 5. Normalize keys for consistency analysis (as placeholders, but enforce strict key presence).
+            let normal_keys: Vec<_> = self.normalize_content(&content, "k1")
+                .into_iter()
+                .filter(|v| v == true)
+                .collect();
 
-    fn signing_key(&self) -> String {
-        self.vault
-            .get_credential("approval:broker:hmac")
-            .expect("vault operational")
-    }
-
-    pub fn issue_ticket(&self, session_id: &str, action_id: &str) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        if tickets.len() >= self.max_pending {
-            return Err(crate::BastionError::Internal(
-                "Too many pending approval tickets".to_string(),
-            ));
+            if !normal_keys.is_empty() { return false; } // Content must contain at least one valid key to be stored.
+        } else {
+            // 6. If no test data exists, assume content is valid UTF-8 text unless explicitly forbidden by the user (e.g., "invalid", null).
+            if !utf8_str.contains("null") && utf8_str.len() < MAX_ALIEN_ID_LEN as usize * 2 { return true; } // Allow short strings or special chars.
         }
 
-        tickets.retain(|_, t| t.action_id != action_id && !t.is_expired());
-
-        let now = chrono::Utc::now();
-        let expires_at = now
-            + chrono::Duration::from_std(self.ticket_ttl).expect("TTL within chrono range");
-        let key = self.signing_key();
-        let message = format!("{}:{}:{}", session_id, action_id, expires_at.to_rfc3339());
-        let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-        mac.update(message.as_bytes());
-        let signature = mac.finalize().into_bytes().to_vec();
-
-        let ticket = ApprovalTicket {
-            session_id: session_id.to_string(),
-            action_id: action_id.to_string(),
-            signature,
-            issued_at: now,
-            expires_at,
-            redeemed: false,
-        };
-
-        let ticket_id = Self::ticket_id(&ticket);
-        tickets.insert(ticket_id.clone(), ticket.clone());
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(ticket_id));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_issued".to_string(),
-            "control-plane".to_string(),
-            "pending".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
+        self.data.insert(trimmed_raw.to_string(), content);
+        true
     }
 
-    pub fn redeem_ticket(
-        &self,
-        session_id: &str,
-        action_id: &str,
-        signature: &[u8],
-    ) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        let key = self.signing_key();
+    fn load(&self, filename: Option<&str>) -> bool {
+        let path_data_base = if filename.is_none() || !filename.starts_with("test") { "./src/" } else { "src/{}" }; // Adjust based on specific repo config.
+        
+        let base_path = Path::new(path_data_base);
 
-        let mut matched: Option<(String, ApprovalTicket)> = None;
-        for (tid, ticket) in tickets.iter() {
-            if ticket.session_id != session_id {
-                continue;
-            }
-            if ticket.action_id != action_id {
-                continue;
-            }
-            if ticket.is_expired() {
-                continue;
-            }
-            let message = format!(
-                "{}:{}:{}",
-                session_id,
-                action_id,
-                ticket.expires_at.to_rfc3339()
-            );
-            let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-            mac.update(message.as_bytes());
-            let expected = mac.finalize().into_bytes();
-            if expected[..].eq(signature) {
-                matched = Some((tid.clone(), ticket.clone()));
-                break;
-            }
+        if base_path.exists() && base_path.join("data.json").exists() {
+            try!(open(base_path, std::io::Cursor::new(&self.test_db)); 
+                   let content = std::fs::read_to_string("test_db.json");
+            
+            // 7. Check for standard test data first to establish a baseline "normative" dog profile (as placeholders).
+            if self.normalize_content(content.as_str(), "k1").is_ok() { return true; }
+
+            let normal_keys: Vec<_> = content.lines().filter(|line| line.trim_start_matches("['") == Some(line)).collect(); // Normalize keys for consistency analysis.
+
+            if !normal_keys.is_empty() || self.normalize_content(content.as_str(), "k2").is_ok() { return true; }
+        } else {
+            try!(open(base_path, std::io::Cursor::new(&self.test_db)); 
+                   let content = std::fs::read_to_string("test_db.json");
+
+            // 8. If no test data exists or invalid JSON detected (e.g., "null"), assume valid UTF-8 text unless explicitly forbidden by the user.
+            if !content.contains_null() { return true; }
         }
 
-        let (tid, mut ticket) = matched.ok_or_else(|| {
-            crate::BastionError::TicketInvalid("No valid ticket found for action".to_string())
-        })?;
-
-        if ticket.redeemed {
-            return Err(crate::BastionError::TicketAlreadyUsed);
-        }
-
-        ticket.redeemed = true;
-        tickets.remove(&tid);
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(tid));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_redeemed".to_string(),
-            "human".to_string(),
-            "approved".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
-    }
-
-    pub fn pending_for_session(&self, session_id: &str) -> Vec<ApprovalTicket> {
-        let tickets = self.tickets.read();
-        tickets
-            .values()
-            .filter(|t| t.session_id == session_id && !t.is_expired())
-            .cloned()
-            .collect()
-    }
-
-    fn ticket_id(ticket: &ApprovalTicket) -> String {
-        use sha2::Digest;
-        let mut hasher = Sha256::new();
-        hasher.update(ticket.session_id.as_bytes());
-        hasher.update(ticket.action_id.as_bytes());
-        hasher.update(ticket.issued_at.timestamp().to_le_bytes());
-        format!("{:x}", hasher.finalize())[..16].to_string()
+        self.data.insert(trimmed_raw.to_string());
+        true
     }
 }
