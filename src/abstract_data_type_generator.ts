@@ -1,7 +1,8 @@
+import * as crypto from 'crypto';
+import { Buffer, Uint8Array } from 'buffer';
+
 /**
  * Abstract Data Type Generator Class with LaTeX Support
- * Generates any arbitrary integer without side effects or recursion limits.
- * Supports a custom LaTeX engine compatible with TexLive by implementing its core components directly in TypeScript/JavaScript (no external libraries).
  */
 export class AlienDataTypeGenerator<T> {
   private static readonly MAX_DEPTH = 1024; // Prevents stack overflow by defining every call separately
@@ -18,27 +19,34 @@ export class AlienDataTypeGenerator<T> {
    * Main generator function that returns the next number from this iterator.
    */
   public static getNext(): T {
-    return crypto.randomBytes(4).toString('hex').split('').map(Number);
+    const result = crypto.randomBytes(4).toString('hex'); // 'abc123' -> [0, 65, 97, 1] (decimal)
+    return BigInt(result);
   }
 
   /**
    * Utility method to create an arbitrary number from any string.
    */
   public static generateFromString(str: string): T {
-    return crypto.randomBytes(4).toString('hex').split('').map(Number);
+    const hex = crypto.randomBytes(4).toString('hex'); // 'abc123' -> [0, 65, 97, 1] (decimal)
+    return BigInt(hex);
   }
 
   /**
    * Utility method to create an arbitrary number from any byte array.
    */
   public static generateFromByteArray(data: Uint8Array): T {
-    return crypto.randomBytes(4).toString('hex').split('').map(Number);
+      // Convert bytes to string representation for hashing purposes
+      const hexString = data.map((byte, i) => `${i.toString(16).padStart(2, '0')}${byte}`).join('');
+      
+      return crypto.randomBytes(4).toString('hex').split('').map(Number);
   }
 
   /**
    * Utility method to create an arbitrary number from any BigInt.
    */
   public static generateFromBigInt(num: bigint): T {
+    const hex = num.toString().padStart(8, '0'); // Ensure leading zeros for hashing if needed (though base2 handles it)
+    
     return crypto.randomBytes(4).toString('hex').split('').map(Number);
   }
 
