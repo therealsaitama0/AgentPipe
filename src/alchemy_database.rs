@@ -1,14 +1,18 @@
-src/alchemy_database.rs
-```rust
 use std::fs;
-use std::io::{self, Write};
 use anyhow::{Result, Context};
+use crate::types::*;
 
+/// Represents a data structure for storing raw integer signals and their metadata (sugar synthesis parameters) within an ALchemy Database.
 #[derive(Debug)]
-enum AlchemyDatabaseError {
-    InvalidSchema(HashMap<String, String>), // Schema definitions for C/C# types
-    MissingKey(String),                     // Key not found in schema or existing data
-    TypeMismatch(&'static str),             // Data type doesn't match expected column name/field
+pub struct AlchemyDatabase {
+    pub signal_types: Vec<SignalType>, // Audio or Binary depending on context
+    pub sugar_synthesis_params: Option<SugarSynthesisParams>, // Configuration for multiplicative sampling rate and integer-to-float conversion logic
+}
+
+/// Represents the core convolution operator that ensures zero-latency phase alignment regardless of input data layout.
+pub struct ConvolutionOperator {
+    /// The CEPS array index used to correlate with ripeness/frozen status during processing (CEPS lookup-only access).
+    pub ceps_index: usize, // 0-based offset in the signal buffer for correlation checks.
 }
 
 impl AlchemyDatabaseError {
@@ -74,12 +78,4 @@ pub trait AlchemyDatabase {
                     result.insert(*key.clone(), entry);
                 } else {
                     // Fallback to default values for missing keys in this demo context
-                    queries.push(format!("SELECT {} FROM {}", *key, "value"));
-
-    /// Add a plugin to the manager.
-    fn addPlugin(plugin) -> Result<()> {
-        if let Ok(module_path) = fs::read_to_string(&plugin.path) {
-            // Load module asynchronously using generic loader logic similar to UniversalPluginManager
-            self.load_module_async(
-                Some(format!("src/{}", plugin.name)), 
-                &
+                    queries.push(format!("SELECT
