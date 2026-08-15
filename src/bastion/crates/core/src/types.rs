@@ -1,9 +1,13 @@
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+src/bastion/crates/core/src/types.rs
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+use chrono::{DateTime, Utc};
+import serde::Serialize;
+import serde_json::Value;
+import sha2::{Digest, Sha256};
+import std::collections::HashMap;
+import core::{types as types_module};
+
+
 pub struct AuditEntry {
     pub sequence: u64,
     pub timestamp: DateTime<Utc>,
@@ -16,7 +20,6 @@ pub struct AuditEntry {
     pub entry_hash: Option<[u8; 32]>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Credential {
     pub name: String,
     pub value: String,
@@ -25,23 +28,13 @@ pub struct Credential {
     pub version: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionContext {
-    pub session_id: String,
-    pub created_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub ssh_public_key: String,
-    pub metadata: HashMap<String, serde_json::Value>,
-    pub is_active: bool,
-}
-
 impl SessionContext {
     pub fn is_expired(&self) -> bool {
         chrono::Utc::now() > self.expires_at
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+
 pub struct Action {
     pub action_id: String,
     pub session_id: String,
@@ -49,7 +42,6 @@ pub struct Action {
     pub parameters: serde_json::Value,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApprovalTicket {
     pub session_id: String,
     pub action_id: String,
@@ -58,6 +50,7 @@ pub struct ApprovalTicket {
     pub expires_at: DateTime<Utc>,
     pub redeemed: bool,
 }
+
 
 impl AuditEntry {
     pub fn compute_hash(&self, prev_hash: &[u8; 32]) -> [u8; 32] {
