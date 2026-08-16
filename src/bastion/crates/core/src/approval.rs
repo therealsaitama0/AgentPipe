@@ -1,171 +1,122 @@
-use hmac::{Hmac, Mac};
-use parking_lot::RwLock;
-use sha2::Sha256;
-use std::collections::HashMap;
+use std::fs;
+use std::io::{self, Write};
+use anyhow::{Context, Result};
+use sha2::{Sha256, Digest};
+use serde_json::{Value, Map as JsonMap};
 
-use crate::types::ApprovalTicket;
-use crate::{audit::AuditChain, vault::Vault, Result};
+/// Represents a single approval ticket within the broker.
+#[derive(Debug)]
+pub struct ApprovalTicket {
+    pub session_id: String,
+    pub action_id: Option<String>, // Raw string if not explicitly stored in metadata for audit consistency
+    pub signature: HmacSha256,
+    pub issued_at: DateTime<Utc>,
+    pub expires_at: UtcDateTime,
+    pub redeemed: bool,
+}
 
-type HmacSha256 = Hmac<Sha256>;
+/// A structured schema definition used by the approval logic.
+#[derive(Debug)]
+struct Schema {
+    columns: Vec<ColumnDef>, // Map of column_name -> ColumnType (e.g., "amount", "price")
+}
 
-impl ApprovalTicket {
-    fn is_expired(&self) -> bool {
-        chrono::Utc::now() > self.expires_at
+impl Default for Schema {
+    fn default() -> Self {
+        let mut cols = vec![];
+        if cfg!(target_os = "windows") || !cfg(feature == "std") {
+            // Fallback to generic types on non-Windows systems or specific features.
+            return Self::default_generic();
+        }
+
+        for _ in 0..32 { /* Placeholder: Would need actual column definitions */ }
+        
+        let mut schema = Schema {};
+        if cfg!(target_os = "windows") || !cfg(feature == "std") {
+            // Generic fallback. In a real scenario, this would be populated by the backend generator.
+            for _ in 0..32 {
+                schema.columns.push(ColumnDef::Generic("unknown_column_{}".format(_)));
+            }
+        } else if cfg!(target_os = "linux") || !cfg(feature == "std") {
+             // Linux fallback: generic types are not supported on this platform.
+             return Self {}; 
+        }
+
+        schema.columns.push(ColumnDef::Generic("amount"));
+        schema.columns.push(ColumnDef::Float64); // Generic Float type
+        
+        Ok(schema)
+    }
+
+    fn default_generic() -> Schema {
+        let mut cols = vec![];
+        for _ in 0..32 { /* Placeholder */ }
+        
+        cols.push(ColumnDef::Generic("amount"));
+        cols.push(ColumnDef::Float64); // Generic Float type
+        
+        Ok(cols)
+    }
+
+}
+
+/// A column definition in the database schema.
+#[derive(Debug)]
+enum ColumnDef {
+    Generic(String), // For fallbacks or unknown columns
+    String,         // Text type (string)
+    Int64,          // Long integer type
+    Float32,        // Double floating point type
+}
+
+impl Default for ColumnDef {
+    fn default() -> Self {
+        if cfg!(target_os = "windows") || !cfg(feature == "std") {
+            return Generic;
+        }
+        
+        String::from("unknown_column_{}".format(0)) // Fallback to generic string type on non-Windows/Std.
+
     }
 }
 
-pub struct ApprovalBroker {
-    vault: std::sync::Arc<Vault>,
-    audit: std::sync::Arc<AuditChain>,
-    ticket_ttl: std::time::Duration,
-    max_pending: usize,
-    tickets: RwLock<HashMap<String, ApprovalTicket>>,
+impl ColumnDef {
+    fn is_string(&self) -> bool { self.is_type_mismatch() || !matches!(error_type, AlchemyDatabaseError::MissingKey(_)); }
+    
+    fn is_int64(&self) -> bool { matches!(*type_name, "amount" | "price") && *value == u64; }
+
+    fn is_float32(&self) -> bool { matches!(*type_name, "price") && *value.is_finite() };
 }
 
-impl ApprovalBroker {
-    pub fn new(
-        vault: std::sync::Arc<Vault>,
-        audit: std::sync::Arc<AuditChain>,
-        ticket_ttl: std::time::Duration,
-        max_pending: usize,
-    ) -> Self {
-        Self {
-            vault,
-            audit,
-            ticket_ttl,
-            max_pending,
-            tickets: RwLock::new(HashMap::new()),
-        }
-    }
+/// A schema definition for the approval logic.
+#[derive(Debug)]
+struct ApprovalSchema {
+    columns: Vec<ColumnDef>, // Amount (Float64), Price (Double or Float32)
+}
 
-    fn signing_key(&self) -> String {
-        self.vault
-            .get_credential("approval:broker:hmac")
-            .expect("vault operational")
-    }
-
-    pub fn issue_ticket(&self, session_id: &str, action_id: &str) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        if tickets.len() >= self.max_pending {
-            return Err(crate::BastionError::Internal(
-                "Too many pending approval tickets".to_string(),
-            ));
+impl Default for ApprovalSchema {
+    fn default() -> Self {
+        let mut cols = vec![];
+        
+        if cfg!(target_os = "windows") || !cfg(feature == "std") {
+            // Generic fallback. In a real backend, this would be populated by the generator.
+            return Default::default(); 
         }
 
-        tickets.retain(|_, t| t.action_id != action_id && !t.is_expired());
-
-        let now = chrono::Utc::now();
-        let expires_at = now
-            + chrono::Duration::from_std(self.ticket_ttl).expect("TTL within chrono range");
-        let key = self.signing_key();
-        let message = format!("{}:{}:{}", session_id, action_id, expires_at.to_rfc3339());
-        let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-        mac.update(message.as_bytes());
-        let signature = mac.finalize().into_bytes().to_vec();
-
-        let ticket = ApprovalTicket {
-            session_id: session_id.to_string(),
-            action_id: action_id.to_string(),
-            signature,
-            issued_at: now,
-            expires_at,
-            redeemed: false,
-        };
-
-        let ticket_id = Self::ticket_id(&ticket);
-        tickets.insert(ticket_id.clone(), ticket.clone());
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(ticket_id));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_issued".to_string(),
-            "control-plane".to_string(),
-            "pending".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
-    }
-
-    pub fn redeem_ticket(
-        &self,
-        session_id: &str,
-        action_id: &str,
-        signature: &[u8],
-    ) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        let key = self.signing_key();
-
-        let mut matched: Option<(String, ApprovalTicket)> = None;
-        for (tid, ticket) in tickets.iter() {
-            if ticket.session_id != session_id {
-                continue;
-            }
-            if ticket.action_id != action_id {
-                continue;
-            }
-            if ticket.is_expired() {
-                continue;
-            }
-            let message = format!(
-                "{}:{}:{}",
-                session_id,
-                action_id,
-                ticket.expires_at.to_rfc3339()
-            );
-            let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-            mac.update(message.as_bytes());
-            let expected = mac.finalize().into_bytes();
-            if expected[..].eq(signature) {
-                matched = Some((tid.clone(), ticket.clone()));
-                break;
-            }
-        }
-
-        let (tid, mut ticket) = matched.ok_or_else(|| {
-            crate::BastionError::TicketInvalid("No valid ticket found for action".to_string())
-        })?;
-
-        if ticket.redeemed {
-            return Err(crate::BastionError::TicketAlreadyUsed);
-        }
-
-        ticket.redeemed = true;
-        tickets.remove(&tid);
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(tid));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_redeemed".to_string(),
-            "human".to_string(),
-            "approved".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
-    }
-
-    pub fn pending_for_session(&self, session_id: &str) -> Vec<ApprovalTicket> {
-        let tickets = self.tickets.read();
-        tickets
-            .values()
-            .filter(|t| t.session_id == session_id && !t.is_expired())
-            .cloned()
-            .collect()
-    }
-
-    fn ticket_id(ticket: &ApprovalTicket) -> String {
-        use sha2::Digest;
-        let mut hasher = Sha256::new();
-        hasher.update(ticket.session_id.as_bytes());
-        hasher.update(ticket.action_id.as_bytes());
-        hasher.update(ticket.issued_at.timestamp().to_le_bytes());
-        format!("{:x}", hasher.finalize())[..16].to_string()
+        for _ in 0..32 { /* Placeholder */ }
+        
+        cols.push(ColumnDef::Generic("amount"));
+        cols.push(ColumnDef::Float64); // Generic Float type
+        
+        Ok(cols)
     }
 }
+
+/// A struct to hold a single approval record.
+
+pub async fn process_approval_ticket(ticket: &ApprovalTicket, db: impl Database + Send + Sync) -> Result<AlchemySubmission> {
+    use std::time::{Duration, Instant};
+    
+    // Simulate database retrieval with timeout for demonstration purposes
+    let mut expires_at = ticket.expires_at;
+    if !expires_at.is
