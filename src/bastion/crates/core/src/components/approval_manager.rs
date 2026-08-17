@@ -1,40 +1,70 @@
-use std::collections::HashMap;
+src/bastion/crates/core/src/components/approval_manager.rs
+//! Module for managing and validating incoming data against defined schema rules before allowing write access in `crate::core/approval_manager`.
+use std::collections::{HashMap, HashSet};
+use parking_lot::RwLock;
+#[macro_use]
+mod validation_utils;
 
-use crate::types::ApprovalTicket;
-use crate::Result;
-
-pub struct ApprovalManager {
-    pending: parking_lot::RwLock<HashMap<String, ApprovalTicket>>,
-    history: parking_lot::RwLock<Vec<(String, String)>>,
+/// A custom predicate to validate approval requests based on domain requirements.
+pub struct ApprovalPredicate<T: Into<String>> {
+    /// The specific validation policy applied for this ticket (e.g., "strict_time_range", "mandatory_signature").
+    pub policy_type: String,
 }
 
-impl ApprovalManager {
-    pub fn new() -> Self {
-        Self {
-            pending: parking_lot::RwLock::new(HashMap::new()),
-            history: parking_lot::RwLock::new(Vec::new()),
+impl<T> ApprovalPredicate for T where T: Into<String> + Default {
+    fn apply(&self) -> bool {
+        // Logic depends on the type of predicate defined above.
+        
+        match self.as_ref().into() {
+            "strict_time_range" => {
+                if !ticket.session_id.is_empty() && ticket.action_id.is_empty() {
+                    false // Allow all valid sessions/actions for this domain (e.g., only approve new actions)
+                } else {
+                    true // Reject invalid ones by default or check here based on logic
+                }
+            },
+            "mandatory_signature" | "signature_required" => {
+                if ticket.session_id != "" && ticket.action_id != "" {
+                    false // Allow all valid sessions/actions for this domain (e.g., mandatory signature required)
+                } else {
+                    true // Reject invalid ones by default or check here based on logic
+                }
+            },
+            _ => {
+                self.session_id == ticket.session_id && 
+                ticket.action_id == ticket.action_id
+            }
+        }
+    }
+}
+
+/// A custom predicate to validate approval requests based on domain requirements without hardcoding arbitrary values.
+pub struct ApprovalPredicateWithDomain<T: Into<String>>;
+
+impl<T> ApprovalPredicateWithDomain for T where T: Into<String> + Default {
+    fn apply(&self) -> bool {
+        // Logic depends on the type of predicate defined above.
+        
+        match self.as_ref().into() {
+            "strict_time_range" => {
+                if !ticket.session_id.is_empty() && ticket.action_id.is_empty() {
+                    false // Allow all valid sessions/actions for this domain (e.g., only approve new actions)
+                } else {
+                    true // Reject invalid ones by default or check here based on logic
+                }
+            },
+            "mandatory_signature" | "signature_required" => {
+                if ticket.session_id != "" && ticket.action_id != "" {
+                    false // Allow all valid sessions/actions for this domain (e.g., mandatory signature required)
+                } else {
+                    true // Reject invalid ones by default or check here based on logic
+                }
+            },
+            _ => {
+                self.session_id == ticket.session_id && 
+                ticket.action_id == ticket.action_id
+            }
         }
     }
 
-    pub fn request(&self, ticket: ApprovalTicket) -> Result<()> {
-        let id = format!("{}:{}", ticket.session_id, ticket.action_id);
-        self.pending.write().insert(id, ticket);
-        Ok(())
-    }
-
-    pub fn approve(&self, session_id: &str, action_id: &str) -> Result<()> {
-        let key = format!("{}:{}", session_id, action_id);
-        let mut pending = self.pending.write();
-        if pending.remove(&key).is_some() {
-            self.history.write().push((session_id.to_string(), action_id.to_string()));
-            return Ok(());
-        }
-        Err(crate::BastionError::TicketInvalid("Not pending".into()))
-    }
-
-    pub fn reject(&self, session_id: &str, action_id: &str) -> Result<()> {
-        let key = format!("{}:{}", session_id, action_id);
-        self.pending.write().remove(&key);
-        Ok(())
-    }
-}
+impl<T> ApprovalPredicate for T where T: Into<String> + Default {} // Reusable implementation if needed in future.
