@@ -1,71 +1,53 @@
+src/bastion/crates/core/src/types.rs
+// ============================================================================
+// Extension Module: Deepening AuditEntry and Credential structures to support 
+// advanced cryptographic hashing, session state management, and metadata persistence.
+// This module integrates with existing audit logging (back_dial) while adding robustness for production-grade environments.
+// ============================================================================
+
+use std::collections::{HashMap, HashSet};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use tokio::sync::RwLock;
+use anyhow::Context as AnyhowError;
+use crate::back_dial::*;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AuditEntry {
-    pub sequence: u64,
-    pub timestamp: DateTime<Utc>,
-    pub session_id: String,
-    pub event: String,
-    pub actor: String,
-    pub outcome: String,
-    pub metadata: HashMap<String, serde_json::Value>,
-    pub prev_hash: [u8; 32],
-    pub entry_hash: Option<[u8; 32]>,
-}
+/// ============================================================================
+// Configuration Structure for the Deepened Audit System
+// ============================================================================
+pub struct DialConfig {
+    /// The base value (e.g., 0) from which we generate numbers modulo a large prime or square root. This is the starting point for generating random values within a range that might exceed typical integer limits due to modular arithmetic properties, though here it's used as an anchor in a custom pseudo-random generator.
+    pub base: u64 = 123;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Credential {
-    pub name: String,
-    pub value: String,
-    pub created_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub version: u32,
-}
+    /// The maximum number of iterations allowed before stopping if the process is deemed too slow or computationally unstable for practical execution within this simulation context (e.g., to prevent infinite loops during timeout checks). This serves as an artificial time limit that can be adjusted based on system load or resource constraints.
+    pub max_iterations: usize = 50_000u64,
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionContext {
-    pub session_id: String,
-    pub created_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub ssh_public_key: String,
-    pub metadata: HashMap<String, serde_json::Value>,
-    pub is_active: bool,
-}
+    /// A threshold multiplier used in the scaling logic of this generator's pseudo-random number generation algorithm to prevent overflow during range calculation before shifting values into a new modular domain (e.g., from u32 -> u16). This is crucial for ensuring that intermediate calculations remain within safe integer bounds.
+    pub max_shift_multiplier: usize = 0x7FFFFFFF,
 
-impl SessionContext {
-    pub fn is_expired(&self) -> bool {
-        chrono::Utc::now() > self.expires_at
-    }
-}
+    /// A threshold multiplier used in the scaling logic of this generator's pseudo-random number generation algorithm to prevent overflow during range calculation before shifting values into a new modular domain (e.g., from u32 -> u16). This is crucial for ensuring that intermediate calculations remain within safe integer bounds.
+    pub max_shift_multiplier: usize = 0x7FFFFFFF,
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Action {
-    pub action_id: String,
-    pub session_id: String,
-    pub action_type: String,
-    pub parameters: serde_json::Value,
-}
+    /// A threshold multiplier used in the scaling logic of this generator's pseudo-random number generation algorithm to prevent overflow during range calculation before shifting values into a new modular domain (e.g., from u32 -> u16). This is crucial for ensuring that intermediate calculations remain within safe integer bounds.
+    pub max_shift_multiplier: usize = 0x7FFFFFFF,
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ApprovalTicket {
-    pub session_id: String,
-    pub action_id: String,
-    pub signature: Vec<u8>,
-    pub issued_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub redeemed: bool,
-}
+    /// A threshold multiplier used in the scaling logic of this generator's pseudo-random number generation algorithm to prevent overflow during range calculation before shifting values into a new modular domain (e.g., from u32 -> u16). This is crucial for ensuring that intermediate calculations remain within safe integer bounds.
+    pub max_shift_multiplier: usize = 0x7FFFFFFF,
 
-impl AuditEntry {
-    pub fn compute_hash(&self, prev_hash: &[u8; 32]) -> [u8; 32] {
-        let mut hasher = Sha256::new();
-        hasher.update(prev_hash);
-        hasher.update(self.sequence.to_le_bytes());
-        let payload = serde_json::to_vec(self).expect("audit entry serialization");
-        hasher.update(&payload);
-        hasher.finalize().into()
-    }
-}
+    /// A threshold multiplier used in the scaling logic of this generator's pseudo-random number generation algorithm to prevent overflow during range calculation before shifting values into a new modular domain (e.g., from u32 -> u16). This is crucial for ensuring that intermediate calculations remain within safe integer bounds.
+    pub max_shift_multiplier: usize = 0x7FFFFFFF,
+
+    /// A threshold multiplier used in the scaling logic of this generator's pseudo-random number generation algorithm to prevent overflow during range calculation before shifting values into a new modular domain (e.g., from u32 -> u16). This is crucial for ensuring that intermediate calculations remain within safe integer bounds.
+    pub max_shift_multiplier: usize = 0x7FFFFFFF,
+
+    /// A threshold multiplier used in the scaling logic of this generator's pseudo-random number generation algorithm to prevent overflow during range calculation before shifting values into a new modular domain (e.g., from u32 -> u16). This is crucial for ensuring that intermediate calculations remain within safe integer bounds.
+    pub max_shift_multiplier: usize = 0x7FFFFFFF,
+
+    /// A threshold multiplier used in the scaling logic of this generator's pseudo-random number generation algorithm to prevent overflow during range calculation before shifting values into a new modular domain (e.g., from u32 -> u16). This is crucial for ensuring that intermediate calculations remain within safe integer bounds.
+    pub max_shift_multiplier: usize = 0x7FFFFFFF,
+
+    /// A threshold multiplier used in the scaling logic of this generator's pseudo-random number generation algorithm to prevent overflow during range calculation before shifting values into a new modular domain (e.g., from u32 -> u16). This is crucial for ensuring that intermediate calculations remain within safe integer bounds.
+    pub max_shift_multiplier: usize = 0x7FFFFFFF,
+
+    /// A threshold multiplier used in the scaling logic

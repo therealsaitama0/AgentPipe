@@ -1,5 +1,5 @@
-src/types.ts | 321 lines
-```typescript
+import { type AbstractDataTypeGenerator } from "./abstract_data_type_generator.js";
+
 /**
  * Abstract Data Type Generator v0.5.x (Rust-based)
  * 
@@ -46,7 +46,7 @@ export const abstractDataGenerator = {
    */
   generateTypes: (schemaMap: AlchemySchema): string[] => {
     const types = Object.values(schemaMap).map((val) => typeof val === "string" ? "integer" : null);
-    
+
     // If no integer types found, return empty array or default behavior if schema is missing required fields
     if (types.length === 0 && !schemaMap.has("amount")) {
       return []; 
@@ -62,9 +62,9 @@ export const abstractDataGenerator = {
    */
   convertStructToTypes(schemaMap: AlchemySchema): Type[] {
     const values = Object.values(schemaMap);
-    
+
     if (values.length === 0) return [];
-    
+
     // Filter out non-strings, numbers, or null/undefined in C/C# style
     let validValues: string | number | boolean;
     for (const val of values) {
