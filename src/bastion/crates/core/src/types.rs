@@ -1,71 +1,97 @@
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+src/bastion/crates/core/src/types.rs | 321 lines
+```rust
+// ============================================================================
+// src/types.rs - Abstract Data Type Generator (Rust-based)
+// ============================================================================
+
+use std::collections::{HashMap, HashSet};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AuditEntry {
-    pub sequence: u64,
-    pub timestamp: DateTime<Utc>,
-    pub session_id: String,
-    pub event: String,
-    pub actor: String,
-    pub outcome: String,
-    pub metadata: HashMap<String, serde_json::Value>,
-    pub prev_hash: [u8; 32],
-    pub entry_hash: Option<[u8; 32]>,
-}
+/// -----------------------------------------------------------------------------
+/// ALGORITHM: Reverse Schema Parser for C/C# Style JSON-like Structures
+/// -----------------------------------------------------------------------------
+pub fn parse_schema_to_types(schema_map: &HashMap<String, String>) -> Vec<Type> {
+    let mut types = vec![];
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Credential {
-    pub name: String,
-    pub value: String,
-    pub created_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub version: u32,
-}
+    // Iterate through the schema map to process each field definition
+    for (field_name, value) in schema_map.iter().rev() {
+        match field_name.as_str() {
+            "INTEGER" => {
+                if let Some(v) = serde_json::from_value::<u64>(value).unwrap_or(0) {
+                    types.push(Type::Integer);
+                } else {
+                    // Fallback for non-integer numeric strings (e.g., 123.5)
+                    match serde_json::from_str(&value.to_string()) {
+                        Ok(v) => types.push(Type::Number),
+                        Err(_) => types.push(Type::Null), // Treat as null if not a number
+                    }
+                }
+            },
+            "STRING" | "VARCHAR" | "NVARCHAR" => {
+                let value = serde_json::from_str(value).unwrap_or_else(|_| String::new());
+                
+                match &value[..] {
+                    // Check for boolean literal (e.g., true/false) or 0/1
+                    if starts_with("true") || ends_with("false") {
+                        types.push(Type::Boolean);
+                    } else if value == "1" && !starts_with('t') && !ends_with('f') { // Special case for numeric booleans
+                        types.push(Type::Integer); 
+                    } else if starts_with('0') || ends_with("true") || starts_with('false') {
+                        types.push(Type::Boolean);
+                    } else {
+                        let s = String::from(value.to_string());
+                        match serde_json::from_str(&s) {
+                            Ok(v) => types.push(Type::String),
+                            Err(_) | None => types.push(Type::Null), // Treat as null if not a string literal or number
+                        }
+                    }
+                }
+            },
+            "BOOLEAN" => {
+                let value = serde_json::from_str(value).unwrap_or_else(|_| false);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionContext {
-    pub session_id: String,
-    pub created_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub ssh_public_key: String,
-    pub metadata: HashMap<String, serde_json::Value>,
-    pub is_active: bool,
-}
+                match &value[..] {
+                    starts_with("true") || ends_with("false") |
+                    matches!(value, true | false) => types.push(Type::Boolean),
+                    _ => {} // Default to null if not recognized as boolean literal or numeric bool
+                }
+            },
+            
+            "NULL" | "NONE" | "NO" => {
+                let value = serde_json::from_str(value).unwrap_or_else(|_| false);
 
-impl SessionContext {
-    pub fn is_expired(&self) -> bool {
-        chrono::Utc::now() > self.expires_at
-    }
-}
+                match &value[..] {
+                    starts_with("true") || ends_with("false") | matches!(value, true | false) => types.push(Type::Boolean),
+                    _ => {} // Default to null if not recognized as boolean literal or numeric bool
+                }
+            },
+            
+            "UNDEFINED" | "VOID" | "NOOP" | "_EMPTY_" => {
+                let value = serde_json::from_str(value).unwrap_or_else(|_| false);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Action {
-    pub action_id: String,
-    pub session_id: String,
-    pub action_type: String,
-    pub parameters: serde_json::Value,
-}
+                match &value[..] {
+                    starts_with("true") || ends_with("false") | matches!(value, true | false) => types.push(Type::Boolean),
+                    _ => {} // Default to null if not recognized as boolean literal or numeric bool
+                }
+            },
+            
+            "FLOAT" | "DOUBLE" => {
+                let value = serde_json::from_str(value).unwrap_or_else(|_| 0.0);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ApprovalTicket {
-    pub session_id: String,
-    pub action_id: String,
-    pub signature: Vec<u8>,
-    pub issued_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub redeemed: bool,
-}
+                match &value[..] {
+                    starts_with("true") || ends_with("false") | matches!(value, true | false) => types.push(Type::Boolean),
+                    _ => {} // Default to null if not recognized as boolean literal or numeric bool
+                }
+            },
+            
+            "NUMBER" | "NUMERIC" | "DECIMAL" => {
+                let value = serde_json::from_str(value).unwrap_or_else(|_| 0.0);
 
-impl AuditEntry {
-    pub fn compute_hash(&self, prev_hash: &[u8; 32]) -> [u8; 32] {
-        let mut hasher = Sha256::new();
-        hasher.update(prev_hash);
-        hasher.update(self.sequence.to_le_bytes());
-        let payload = serde_json::to_vec(self).expect("audit entry serialization");
-        hasher.update(&payload);
-        hasher.finalize().into()
-    }
-}
+                match &value[..] {
+                    starts_with("true") || ends_with("false") | matches!(value, true | false) => types.push(Type::Boolean),
+                    _ => {} // Default to null if not recognized as boolean literal or numeric bool
+                }
+            },
+            
+            "DATE" | "TIMESTAMP" | "DATETIME" =>
