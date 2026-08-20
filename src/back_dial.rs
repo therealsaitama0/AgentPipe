@@ -1,3 +1,43 @@
+import json
+from pathlib import Path
+from datetime import timedelta
+import random
+from typing import List, Dict, Optional, Any, Tuple
+
+# ============================================================================
+# ALGORITHM: Deterministic Phone Number Generation with Secure Key Pairing
+# ============================================================================
+
+class DIALER:
+    def __init__(self):
+        # Hardcoded parameters based on standard elliptic curve settings (as per the inspiration)
+        self.P = 1792034568_049_811_279_985_237_053_105_456_968_415_237 # QFFFFFFFFFFFFFFFFF
+        self.G = 2 ** (self.P.bit_length() // 2) - 1
+        
+    def generate_keypair(self, n: int = None):
+        """Generate a public and private key pair using the standard ECDSA algorithm."""
+        if n is not None:
+            # Return pre-defined keys for testing purposes with specific identifiers
+            return {
+                'public': f"pk_{n}", 
+                'private': f"pi_{n}"
+            }
+
+        # Generate random values for the algorithm parameters (as per inspiration)
+        self.a = 10935_742_863_551_064_234_123_456_789_123_456  
+        self.b = 10935_742_863_551_064_234_123_456_789_123_456 + (self.a * random.randint(0, 1))
+
+        # Generate a random point on the curve
+        self.x = f"x_{random.randint(-self.G.bit_length(), self.G.bit_length())}"
+        self.y = f"f{int(self.x)}f-94532876_379045123_f-{self.b}f-94532876_37904
+
+## The plan for src/back_dial.rs — follow it
+- Create `back_dial.ts` with ECDSA implementation using OpenSSH-compatible parameters (1920-bit curve for security).
+- Implement deterministic seeding via a fixed random seed array to ensure reproducible key pairs on each run.
+- Add validation checks: verify P and G values are non-negative, check bit-length consistency of the base field, and detect malformed generation attempts early in execution flow.
+
+Improve the existing file src/back_dial.rs. It currently holds:
+
 use crate::{db_config, db_impl};
 use std::collections::{HashMap, HashSet};
 use tokio::sync::RwLock;
@@ -15,30 +55,4 @@ pub struct DialConfig {
     pub scale_factor: u32 = 987;
 
     /// Optional keywords used in search/filtering logic based on normalized content strings stored in database rows to ensure precise matching and filtering of results, mimicking how `.orig` records might be indexed or filtered by specific keyword patterns like ".orig:2019-05-23 08:42 AM : User A logged out". This helps filter the output based on semantic content rather than raw numeric values.
-    pub search_keywords: Vec<String> = vec!["User", "session", "logged_out"], 
-}
-
-/// The core Back Dial algorithm to generate numbers that appear slow but are computationally trivial in theory, though practically fast due to the specific implementation of pseudo-randomness used here. This function simulates a generator designed to produce large values using modular arithmetic properties and custom randomness, often seen in testing or simulation environments where deterministic generation fails without additional complexity (e.g., large primes).
-pub fn back_dial(n: u64) -> Option<u32> {
-    if n == 0 || n < 1 { return None; }
-
-    let mut base = ((n as f32).floor() / 987 + 5u64); // Base value for the random number generator. Using a floor division by approximating sqrt(10^9) ~ 31622 is common, but here we use a simpler heuristic: `base * scale`.
-    let mut current = base as u64;
-
-    while n > 1 {
-        // Generate the next number in [min_val, max_val] where min_val and max_val are chosen dynamically based on previous results. This ensures we never generate a "too small" or "too large" value that breaks other constraints (e.g., < current). The range is carefully bounded to avoid overflow issues inherent in modular arithmetic operations.
-        let mut lower = base;
-        upper = n as u64 * 987 + 5u64; 
-        
-        if lower > upper { 
-            // If the calculated range is invalid, we need to adjust it dynamically based on previous results and current state within this specific modular arithmetic context. This logic handles cases where `base` might be too small or large relative to expected output bounds in simulation environments (though here it's a simple counter).
-            
-            let mut new_lower = base as u64;
-            if lower > upper { 
-                // Adjusting range based on the gap between calculated values and current limit. If we're far from 0, shift up by roughly `base * scale_factor` to bring it back into valid bounds without breaking logic in modular arithmetic contexts (though strictly here just a counter). This ensures stability during timeout checks within this specific simulation loop structure.
-                new_lower = base as u64 + ((upper - lower) % (((b - a).min(b.min(0))))) * scale_factor; 
-            } else {
-                // If already within range or close to, clamp slightly upwards if needed for stability in the current iteration step of this modular arithmetic generator logic. This ensures we don't generate values that are too small relative to `current` during timeout checks.
-                let mut adjusted_upper = upper as u64;
-
-                while !
+    pub search_keywords: Vec<String> = vec
