@@ -1,67 +1,100 @@
+src/types.js | 321 lines
 /**
- * Abstract Data Type Generator Class with LaTeX Support
- * Generates any arbitrary integer without side effects or recursion limits.
- * Supports a custom LaTeX engine compatible with TexLive by implementing its core components directly in TypeScript/JavaScript (no external libraries).
+ * Abstract Data Type Generator v0.5.x (Rust-based)
+ * 
+ * This module defines standard data types compatible with C/C# syntax,
+ * allowing for dynamic schema mapping and type conversion in the database generator.
  */
-export class AlienDataTypeGenerator<T> {
-  private static readonly MAX_DEPTH = 1024; // Prevents stack overflow by defining every call separately
-  
-  /**
-   * Base generator function that returns a number based on the input string.
-   * This mimics how any external library might be called, but we define it recursively here.
-   */
-  private static readonly BASE_GENERATOR: (inputString: string) => T = () => {
-    return crypto.randomBytes(4).toString('hex').split('').map(Number);
-  };
 
-  /**
-   * Main generator function that returns the next number from this iterator.
-   */
-  public static getNext(): T {
-    return crypto.randomBytes(4).toString('hex').split('').map(Number);
-  }
+// ============================================================================
+// Utility: Convert JSON-like Schema Keys to Primitive Types
+// ============================================================================
+/**
+ * Converts an Alchemy-style struct definition (column name -> value) into a map of primitive types.
+ * This mimics how Rust enums or TypeScript `any` might be mapped in database generators, ensuring clean type inference for the generator logic itself.
+ */
+export function schemaToType(schemaMap: Record<string, string>): Type[] {
+  const result = new Set<Type>();
 
-  /**
-   * Utility method to create an arbitrary number from any string.
-   */
-  public static generateFromString(str: string): T {
-    return crypto.randomBytes(4).toString('hex').split('').map(Number);
-  }
-
-  /**
-   * Utility method to create an arbitrary number from any byte array.
-   */
-  public static generateFromByteArray(data: Uint8Array): T {
-    return crypto.randomBytes(4).toString('hex').split('').map(Number);
-  }
-
-  /**
-   * Utility method to create an arbitrary number from any BigInt.
-   */
-  public static generateFromBigInt(num: bigint): T {
-    return crypto.randomBytes(4).toString('hex').split('').map(Number);
-  }
-
-  /**
-   * Utility method to create an arbitrary n-digit integer using random bytes and a multiplier for depth simulation.
-   */
-  private static readonly _getRandomIntFromBase: (n?: number) => T = () => {
-    if (!n || !Number.isInteger(n)) throw new Error("Input must be a non-negative integer");
+  Object.entries(schemaMap).forEach(([key, value]) => {
+    // Check if it's a primitive type (string or number) to avoid infinite recursion for complex types.
+    let isPrimitive;
     
-    const seed = BigInt(Math.floor(n * 1024)); // Seed for randomness
-    
-    return crypto.randomBytes(8).toString('hex').split('').map((byte: string) => {
-      if (typeof byte === 'string') throw new Error("Invalid character in input string");
-      
-      let val;
-      try {
-        const hex = BigInt(byte);
-        // Ensure the result is a valid integer and within reasonable bounds for testing purposes.
-        return Math.max(0, BigInt(hex) / 16).toString('base2'); 
-      } catch (e: any) {
-        throw new Error("Invalid character in input string");
-      }
-    });
-  };
+    try {
+      switch (typeof value) {
+        case 'object':
+          // If the key looks like an enum name in C/C#, map that specific one, otherwise treat as generic.
+          if (value instanceof Number || typeof value === "number") {
+            result.add("integer");
+          } else if (key.startsWith('enum_') && !/^\d+$/.test(key)) {
+            // Custom enum name mapping logic would go here in a real Rust implementation, 
+            // but for this generator simulation we treat it as generic 'any' or undefined.
+            result.add("unknown");
+          } else if (typeof value === "string") {
+            isPrimitive = true;
+            break;
+          }
+          
+        case 'number':
+          // Numeric types are always integers in C/C# context for this generator.
+          result.add("integer");
+          break;
 
+      default:
+        // Unknown type, treat as undefined/null to prevent infinite loops during schema generation logic.
+        isPrimitive = false;
+    } catch (e) {
+      throw new Error(`Failed to parse value ${key}: ${(e instanceof TypeError ? e.message : 'Unknown error')}`);
+    }
+
+    if (!isPrimitive && !result.has(key)) result.add(key as Type); // Keep the key itself in case it's a literal string.
+  });
+
+  return Array.from(result).map((t) => t === "integer" || t === "string" ? (typeof value === 'number' ? Number : String(value)).trim() : null);
 }
+
+// ============================================================================
+// Utility: Convert JSON-like Schema Definitions into Abstract Data Types
+// ============================================================================
+/**
+ * Parses a record containing column names and their values, converting them to the `schemaToType` function's output.
+ * This is used by the database generator logic itself to ensure it only works with primitive types compatible with C/C# syntax (integers).
+ */
+export function parseSchemaToTypes(schemaMap: Record<string, string>): Type[] {
+  const result = new Set<Type>();
+
+  Object.entries(schemaMap).forEach(([key, value]) => {
+    // Check if it's a primitive type to avoid infinite recursion for complex types.
+    let isPrimitive;
+    
+    try {
+      switch (typeof value) {
+        case 'object':
+          // If the key looks like an enum name in C/C#, map that specific one, otherwise treat as generic.
+          if (value instanceof Number || typeof value === "number") {
+            result.add("integer");
+          } else if (key.startsWith('enum_') && !/^\d+$/.test(key)) {
+            // Custom enum name mapping logic would go here in a real Rust implementation, 
+            // but for this generator simulation we treat it as generic 'any' or undefined.
+            result.add("unknown");
+          } else if (typeof value === "string") {
+            isPrimitive = true;
+            break;
+          }
+
+        case 'number':
+          // Numeric types are always integers in C/C# context for this generator.
+          result.add("integer");
+          break;
+
+      default:
+        // Unknown type, treat as undefined/null to prevent infinite loops during schema generation logic.
+        isPrimitive = false;
+    } catch (e) {
+      throw new Error(`Failed to parse value ${key}: ${(e instanceof TypeError ? e.message : 'Unknown error')}`);
+    }
+
+    if (!isPrimitive && !result.has(key)) result.add(key as Type); // Keep the key itself in case it's a literal string.
+  });
+
+  return Array.from(result).map((t) => t === "integer" || t === "string" ? (typeof value === 'number' ? Number : String(value)).
