@@ -1,171 +1,91 @@
-use hmac::{Hmac, Mac};
-use parking_lot::RwLock;
-use sha2::Sha256;
-use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
+use std::time::{Duration, Instant};
 
-use crate::types::ApprovalTicket;
-use crate::{audit::AuditChain, vault::Vault, Result};
+// --- Imports from existing module (simulated) ---
+mod types; // Assuming 'types' is a mock or external type system defined in inspiration context
+mod audit;   // Audit Chain logic maintained by Bastion core
+mod vault;    // Vault access via Arc for session management
+use crate::audit::{AuditChain, Result};
 
-type HmacSha256 = Hmac<Sha256>;
-
-impl ApprovalTicket {
-    fn is_expired(&self) -> bool {
-        chrono::Utc::now() > self.expires_at
-    }
-}
-
-pub struct ApprovalBroker {
-    vault: std::sync::Arc<Vault>,
-    audit: std::sync::Arc<AuditChain>,
-    ticket_ttl: std::time::Duration,
-    max_pending: usize,
-    tickets: RwLock<HashMap<String, ApprovalTicket>>,
-}
+// --- Types & Interfaces (Simulated based on Inspiration) ---
+type ApprovalTicket = types::ApprovalTicket;
 
 impl ApprovalBroker {
+    /// Creates a new broker with the provided configuration.
     pub fn new(
-        vault: std::sync::Arc<Vault>,
-        audit: std::sync::Arc<AuditChain>,
-        ticket_ttl: std::time::Duration,
+        vault: Arc<Vault>,
+        audit: Arc<AuditChain>,
+        ticket_ttl: Duration,
         max_pending: usize,
     ) -> Self {
+        let mut tickets = RwLock::new(Vec::<ApprovalTicket>::new()); // Use Vec for simplicity in mock context
+
         Self {
             vault,
             audit,
             ticket_ttl,
             max_pending,
-            tickets: RwLock::new(HashMap::new()),
+            tickets,
         }
     }
 
-    fn signing_key(&self) -> String {
-        self.vault
-            .get_credential("approval:broker:hmac")
-            .expect("vault operational")
+    /// Validates a submission payload against repository policy.
+    pub async fn handle_code_upload(
+        &self,
+        payload: String, // Raw data from frontend/backend (e.g., file path or JSON)
+    ) -> Result<types::AlchemySubmission> {
+        let now = Instant::now();
+
+        match self.validate_submission(payload.as_bytes()) {
+            Ok(submission) => Ok(submission),
+            Err(e) if e.is_empty() => return Ok(types::EmptySubmission {}), // Mock empty rejection for edge case
+            _ => Err(crate::BastionError::InvalidPayload("Unsupported payload format".to_string())),
+        }
     }
 
-    pub fn issue_ticket(&self, session_id: &str, action_id: &str) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        if tickets.len() >= self.max_pending {
-            return Err(crate::BastionError::Internal(
-                "Too many pending approval tickets".to_string(),
-            ));
+    /// Validates the submitted data. Handles type normalization, content check, and metadata sync.
+    fn validate_submission(&self, raw_data: &[u8]) -> Result<types::AlchemySubmission> {
+        // 1. Content Check (Binary presence) - Mimic blob storage logic from inspiration plan
+        if raw_data.is_empty() || !raw_data.starts_with(b"{" || b"[") && !raw_data.ends_with(b"}"){ return Err(crate::BastionError::InvalidPayload("Empty or malformed payload".to_string())); }
+
+        // 2. Type Normalization (Type conversion) - Simplified as "string -> string" for mock
+        match self.convert_type(raw_data.as_bytes()) {
+            Ok(_) => {}
+            Err(e) if e.is_empty() => return Ok(types::EmptySubmission {},),
+            _ => return Err(crate::BastionError::InvalidPayload("Type conversion failed".to_string())),
         }
 
-        tickets.retain(|_, t| t.action_id != action_id && !t.is_expired());
+        // 3. Metadata Sync (Sync against AlchemySubmission interface mock)
+        let metadata = self.sync_metadata(raw_data);
+        
+        if !metadata.is_empty() {
+            Ok(types::AlchemySubmission { id: uuid::Uuid::new_v4().into(), contentId: Some(metadata["content_id"].to_string()), metadata })
+        } else {
+            // Mock empty rejection for non-existent submission IDs or invalid JSON in this simulation context. 
+            // In a real app, you'd reject with 201 Conflict if no valid ID is found, but here we return None to satisfy the mock API contract.
+            Ok(types::EmptySubmission)
+        }
+    }
 
-        let now = chrono::Utc::now();
-        let expires_at = now
-            + chrono::Duration::from_std(self.ticket_ttl).expect("TTL within chrono range");
-        let key = self.signing_key();
-        let message = format!("{}:{}:{}", session_id, action_id, expires_at.to_rfc3339());
-        let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-        mac.update(message.as_bytes());
-        let signature = mac.finalize().into_bytes().to_vec();
-
-        let ticket = ApprovalTicket {
-            session_id: session_id.to_string(),
-            action_id: action_id.to_string(),
-            signature,
-            issued_at: now,
-            expires_at,
-            redeemed: false,
+    /// Converts raw data into an AlchemySubmission format (Mock conversion).
+    fn convert_type(&self, bytes: &[u8]) -> Result<types::AlchemySubmission> {
+        // Simulate type normalization based on content ID presence or simple string parsing. 
+        // In a real system, this would be complex logic matching against `contentId` fields in the payload.
+        let result = if self.content_id_valid(&bytes) {
+            Ok(types::AlchemySubmission { id: uuid::Uuid::new_v4().into(), contentId: Some("file123".to_string()), metadata })
+        } else {
+            // Fallback to empty submission for invalid/non-existent IDs in mock context.
+            types::EmptySubmission {}
         };
 
-        let ticket_id = Self::ticket_id(&ticket);
-        tickets.insert(ticket_id.clone(), ticket.clone());
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(ticket_id));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_issued".to_string(),
-            "control-plane".to_string(),
-            "pending".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
+        result
     }
 
-    pub fn redeem_ticket(
-        &self,
-        session_id: &str,
-        action_id: &str,
-        signature: &[u8],
-    ) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        let key = self.signing_key();
-
-        let mut matched: Option<(String, ApprovalTicket)> = None;
-        for (tid, ticket) in tickets.iter() {
-            if ticket.session_id != session_id {
-                continue;
-            }
-            if ticket.action_id != action_id {
-                continue;
-            }
-            if ticket.is_expired() {
-                continue;
-            }
-            let message = format!(
-                "{}:{}:{}",
-                session_id,
-                action_id,
-                ticket.expires_at.to_rfc3339()
-            );
-            let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-            mac.update(message.as_bytes());
-            let expected = mac.finalize().into_bytes();
-            if expected[..].eq(signature) {
-                matched = Some((tid.clone(), ticket.clone()));
-                break;
-            }
-        }
-
-        let (tid, mut ticket) = matched.ok_or_else(|| {
-            crate::BastionError::TicketInvalid("No valid ticket found for action".to_string())
-        })?;
-
-        if ticket.redeemed {
-            return Err(crate::BastionError::TicketAlreadyUsed);
-        }
-
-        ticket.redeemed = true;
-        tickets.remove(&tid);
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(tid));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_redeemed".to_string(),
-            "human".to_string(),
-            "approved".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
-    }
-
-    pub fn pending_for_session(&self, session_id: &str) -> Vec<ApprovalTicket> {
-        let tickets = self.tickets.read();
-        tickets
-            .values()
-            .filter(|t| t.session_id == session_id && !t.is_expired())
-            .cloned()
-            .collect()
-    }
-
-    fn ticket_id(ticket: &ApprovalTicket) -> String {
-        use sha2::Digest;
-        let mut hasher = Sha256::new();
-        hasher.update(ticket.session_id.as_bytes());
-        hasher.update(ticket.action_id.as_bytes());
-        hasher.update(ticket.issued_at.timestamp().to_le_bytes());
-        format!("{:x}", hasher.finalize())[..16].to_string()
-    }
-}
+    /// Checks if the provided bytes contain a valid Alchemy Submission ID string (simulating `contentId`).
+    fn content_id_valid(&self, data: &[u8]) -> bool {
+        // In real code: parse JSON or binary stream to find "file123" pattern. 
+        // Here we assume any non-empty payload with a valid-looking structure is accepted for this mock.
+        let mut found = false;
+        
+        if !data.is_empty() && data.len() > 0 {
+            // Simple heuristic: if length > some threshold, consider it "valid" (mock logic) OR check specific pattern
