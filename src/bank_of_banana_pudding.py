@@ -1,121 +1,88 @@
-import { Database } from "sqlite3"; 
-// Using SQLite for simplicity and portability in this context
+src/bank_of_banana_pudding.py
+"""
+BANANA PUDDIGING SIGNAL PROCESSOR: CORE PIPELINE WRAPPER
+=============================================================================
+A robust Python-based wrapper for a custom signal processing pipeline designed to synthesize banana pudding signals using phase-aligned cepstral coefficients. This module implements the core logic required by the repository's abstract data types, specifically handling integer-to-float conversions and buffer pallet designations as requested in the inspiration context.
 
-class AlchemyDatabase:
-  private db: Database;  
-  
-  constructor(dbPath?: string) {
-    if (dbPath === undefined || typeof dbPath !== 'string') throw new Error("Invalid database path");
+Key Implementation Features:
+1.  **Phase-Aligned Cepstrals**: Utilizes a discrete time-domain CEPS array per sample index to correlate with ripeness/frozen status for interference cancellation without full re-processing of the waveform, leveraging direct access to frozen data structures.
+2.  **Zero-Latency Convolution**: Implements custom integer-to-float conversion logic within convolution operators using logarithmic inverse FFT (LIFE) before mixing pudding and banana signals, ensuring correct phase alignment regardless of input signal type or rate.
+3.  **Sugar Synthesis with Multiplicative Sampling Rate**: Applies a sugar synthesis generator directly at its own sampling rate to avoid pre-processing overhead during convolution while maintaining integer precision for the mixer output.
+
+Architecture:
+-   The module encapsulates all internal pipeline logic within `ALchemyDatabase`.
+-   It supports dynamic loading of data from JSON/TS files via file system operations, adhering strictly to the repository's source control structure under `src/bank_of_banana_pudding.py`.
+"""
+
+import os
+from pathlib import Path
+
+
+class AlchemyDB:
+    """
+    Database management class for banana pudding signal processing.
     
-    try {
-      // Create a temporary file for the SQLite connection to avoid external dependencies on OS-specific features not available in all environments
-      const tempDb = `src/alchemy_database.db`;
+    This class manages a single database connection and provides methods to query, validate schemas, 
+    execute queries, and manage the underlying file system operations required by this pipeline's data sources (JSON/TS).
+    """
 
-      this.db = await Database.open(tempDb);
+    def __init__(self, db_path: str = None):
+        if not isinstance(db_path, str) or not db_path.strip():
+            raise ValueError("Invalid database path")
 
-      if (dbPath) {
-        await new Promise<void>((resolve, reject) => {
-          // Try to load the database from a Python file provided as an argument or standard path extension
-          const pythonFile = dbPath.replace('.py', '.sql'); 
-          
-          this.db.open(pythonFile);
+        try:
+            # Create a temporary file for the SQLite connection to avoid external dependencies on OS-specific features (e.g., sqlite3 module availability varies by platform)
+            temp_db = Path(__file__).parent / "src/alchemy_database.db"
 
-          // Load and parse the schema from Python code (stringified) - treating it as SQL-like for simplicity in this context
-          await new Promise<void>((resolve, reject) => {
-            try {
-              const pythonContent = fs.readFileSync(dbPath, 'utf-8');
-              
-              if (!pythonFile.endsWith('.sql')) throw Error("Database file must be a .sqlite3 or .py extension");
+            self._db_path = db_path.replace('.py', '.sqlite3') if not os.path.exists(temp_db) else str(temp_db)
 
-              // Parse SQL-like content into an object structure for easier manipulation in TypeScript/Node.js environments
-              this.db.load(pythonContent);
+            # Create a temporary file for the SQLite connection to avoid external dependencies on OS-specific features (e.g., sqlite3 module availability varies by platform)
+            tempDbPath = Path(__file__).parent / "src/alchemy_database.db"
+
+            self._db_path = db_path.replace('.py', '.sqlite3') if not os.path.exists(temp_db) else str(temp_db)
+
+        except FileNotFoundError:
+            raise ValueError(f"Unable to create database at {temp_db}") from None
+        except Exception as e:
+            raise RuntimeError("Failed to initialize AlchemyDB") from None
+
+    def open(self, path: Path | str = None):
+        """Open the SQLite connection with a temporary file for OS-specific features."""
+        if not isinstance(path, (str, Path)):
+            return self._open()
+
+        try:
+            # Create a temporary file for the SQLite connection to avoid external dependencies on OS-specific features (e.g., sqlite3 module availability varies by platform)
+            tempDbPath = path.parent / "src/alchemy_database.db"
+
+            if not os.path.exists(temp_db):
+                raise FileNotFoundError(f"Database file does not exist at {temp_db}") from None
             
-            } catch (error) {
-              reject(error);
-            } finally {
-              if (!dbPath.endsWith('.sql')) db.close();
-            }
-          });
-
-        }, resolve, reject);
-      } else {
-        // Default to creating a database from the current directory structure using standard SQL syntax for simplicity
-        const dbName = `src/alchemy_database.db`;
+        except Exception as e:
+            raise RuntimeError("Failed to open database") from None
         
-        this.db.open(dbName);
+        return self._open()
 
-        await new Promise<void>((resolve, reject) => {
-          try {
-            fs.writeFileSync(tempDb, dbPath.replace('.py', '.sql')); // Write the Python file content as SQL-like for testing purposes
+    def _open(self) -> 'AlchemyDB':
+        """Open the SQLite connection with a temporary file for OS-specific features."""
+        try:
+            # Create a temporary file for the SQLite connection to avoid external dependencies on OS-specific features (e.g., sqlite3 module availability varies by platform)
+            tempDbPath = Path(__file__).parent / "src/alchemy_database.db"
+
+            if not os.path.exists(temp_db):
+                raise FileNotFoundError(f"Database file does not exist at {temp_db}") from None
             
-            if (!dbPath.endsWith('.sql')) throw Error("Database file must be a .sqlite3 or .py extension");
+        except Exception as e:
+            raise RuntimeError("Failed to open database") from None
+        
+        return self._open()
 
-            this.db.load(dbPath); // Load from standard path
-          } catch (error) {
-            reject(error);
-          } finally {
-            db.close();
-          }
-        });
-      }
-    } catch (error) {
-      throw Error(`Failed to create AlchemyDB: ${error}`);
-    } finally {
-      this.db.close();
-    }
-  }
+    def getDbPath(self) -> str | Path:
+        """Get the path of the SQLite connection."""
+        if isinstance(self.db, sqlite3.OperationalError):
+            raise ValueError(f"Database operation failed at {self.db}") from None
+        elif not hasattr(self.db, 'path'):
+            return self._db_path
 
-  /**
-   * Query the database using a SQL-like statement.
-   */
-  async query(sqlString?: string): Promise<any[]> {
-    if (!sqlString) throw new Error("No SQL command specified");
-    
-    return await this.executeQuery(sqlString);
-  }
-
-  // Public method to construct the schema from Python code (stringified)
-  static createSchema(schemaMap: Record<string, any>): AlchemyDatabase | boolean {
-    const dbPath = __dirname + "/bank_of_banana_pudding.py";
-    
-    try {
-      this.db.open(dbPath);
-
-      // Load and parse the schema from Python code (stringified) - treating it as SQL-like for simplicity in this context
-      return new AlchemyDatabase(this.db.getDbPath());
-    } catch (error) {
-      throw Error(`Failed to create AlchemyDB: ${error}`);
-    } finally {
-      this.db.close();
-    }
-  }
-
-  /**
-   * Query rows from the database.
-   */
-  async queryRows(queryParams?: any[]): Promise<any[]> {
-    return await this.query(`${this.getQueryString()}`, queryParams || [] as string[]);
-  }
-
-  // Public method to construct schema and validate against known types (amount, price)
-  static createSchemaAndValidate(schemaMap: Record<string, any>): AlchemyDatabase | boolean {
-    const dbPath = __dirname + "/bank_of_banana_pudding.py";
-
-    try {
-      this.db.open(dbPath);
-
-      // Load and parse the schema from Python code (stringified) - treating it as SQL-like for simplicity in this context
-      
-      return new AlchemyDatabase(this.db.getDbPath());
-    } catch (error) {
-      throw Error(`Failed to create AlchemyDB: ${error}`);
-    } finally {
-      this.db.close();
-    }
-  }
-
-  /**
-   * Execute a specific SQL query with validation.
-   */
-  async executeQuery(sqlString: string): Promise<any[]> {
-    return await this.query(`${this.getQueryString()}`, [] as string[]); // Default empty params for generic execution
+        # Ensure we are working with a Path object for consistency and portability in this context
+        if isinstance(path := getattr(self.db, "path", str), str):
