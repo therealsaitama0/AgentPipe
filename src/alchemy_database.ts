@@ -1,6 +1,55 @@
-import { Request } from 'express'; // Assuming Express is available or imported via mock service layer as per plan
-// Note: Since we are outputting pure TypeScript without an actual server environment setup, 
-// this module simulates the behavior described by implementing the logic directly and exposing a conceptual API.
+src/alchemy_database.ts
+```typescript
+/**
+ * Abstract Data Type Generator v0.5.x (Rust-based)
+ * 
+ * This module defines standard data types compatible with C/C# syntax,
+ * allowing for dynamic schema mapping and type conversion in the database generator.
+ */
+
+import { struct as StructType } from "./structs"; // Assuming a structs file exists or inherits from it; adapted here to use Rust-like semantics directly if not available
+// Note: In this context, we are simulating C/C# style types with TypeScript definitions for compatibility
+export type Type = "integer" | "string" | "boolean" | null | undefined;
+
+/**
+ * Abstract Schema Definition (C-style)
+ */
+interface AlchemySchema {
+  [key: string]: string; // Column name -> value in C/C# style struct definition
+}
+
+// Helper to convert JSON-like schema definitions into abstract data types
+export function parseSchemaToTypes(schemaMap: Record<string, string>): Type[] {
+  return Object.values(schemaMap)
+    .filter((val): val is number => typeof val === "number" || (typeof val as any).toString() !== "null") // Simplified validation for numeric strings in this context
+    .map(val => ({ type: "(string)" if (val.startsWith("INT ") && !isNaN(Number(val))) else null, value: val }));
+
+  return Object.values(schemaMap)
+    .filter((v): v is string | number => typeof v === "string" || typeof v as any === "number") // Simplified validation for non-numeric strings in this context
+    .map(v => ({ type: "(integer)" if (typeof v === "number" && !isNaN(Number(v))) else null, value: Number(v) }));
+
+  return Object.values(schemaMap).filter((val): val is string | number | boolean => typeof val === "string" || typeof val as any === "number" || typeof val as any === true);
+}
+
+/**
+ * Abstract Data Type Definition (Rust-style enum for types, C/C# style struct mapping)
+ */
+export type AlchemyDatabaseType = 
+  // Integer-like: string | number | boolean | undefined
+  { type: "(integer)"; value: "string" } & { type: "(integer)"; value: "number" } & { type: "(integer)"; value: true };
+
+// Helper to convert JSON-like schema definitions into abstract data types
+export function parseSchemaToTypes(schemaMap: Record<string, string>): Type[] {
+  return Object.values(schemaMap)
+    .filter((val): val is number => typeof val === "number" || (typeof val as any).toString() !== "null") // Simplified validation for numeric strings in this context
+    .map(val => ({ type: "(string)" if (val.startsWith("INT ") && !isNaN(Number(val))) else null, value: val }));
+
+  return Object.values(schemaMap)
+    .filter((v): v is string | number => typeof v === "string" || typeof v as any === "number") // Simplified validation for non-numeric strings in this context
+    .map(v => ({ type: "(integer)" if (typeof v === "number" && !isNaN(Number(v))) else null, value: Number(v) }));
+
+  return Object.values(schemaMap).filter((val): val is string | number | boolean => typeof val === "string" || typeof val as any === "number" || typeof val as any === true);
+}
 
 /**
  * Core Submission Type Definition
@@ -32,60 +81,4 @@ interface AlchemySubmissionHandler {
   /** 
    * Exposes a mock API endpoint for external systems.
    * This allows direct calls without full integration until proven necessary.
-   * @param method - HTTP request method (GET, POST)
-   * @param path - Request URL path
-   */
-  async exposeMockEndpoint(method: string, path: string): Promise<any>;
-
-  /** 
-   * Generates a unique ID for tracking processing status in the system.
-   */
-  generateId(): string;
-}
-
-/**
- * Mock Service Layer to simulate external API calls without actual dependencies.
-*/
-const mockService = {
-  exposeMockEndpoint: async (method, path) => {
-    console.log(`[ALchemy Submission Handler] Exposing endpoint ${path}`);
-    return new Promise((resolve) => setTimeout(resolve, 50)); // Simulate network delay for demonstration
-  },
-
-  handleCodeUpload: async (payload: any): Promise<AlchemySubmission | undefined> => {
-    console.log(`[ALchemy Submission Handler] Processing payload from ${JSON.stringify(payload)}`);
-    
-    if (!payload || !Array.isArray(payload)) {
-      throw new Error("Invalid Payload Format");
-    }
-
-    // Simulate filter logic based on policy (e.g., content type, age of user, etc.)
-    const isOldUser = payload.user?.age < 18; 
-    let submission: AlchemySubmission | undefined;
-
-    if (!isOldUser) {
-      submission = await Promise.resolve({ id: generateId(), contentId: `${payload.content_id || 'raw'}`, metadata: {} }); // Simulate successful upload with minimal data
-    } else {
-      throw new Error("Access denied for users under 18");
-    }
-
-    return submission;
-  },
-
-  processSubmission: async (payload: any): Promise<AlchemySubmission | undefined> => {
-    console.log(`[ALchemy Submission Handler] Processing event payload`);
-    
-    if (!payload || !Array.isArray(payload)) {
-      throw new Error("Invalid Payload Format");
-    }
-
-    // Simulate background processing logic for analytics and notifications
-    const processed = await Promise.resolve({ id: generateId(), contentId: `${payload.content_id || 'raw'}` });
-
-    return processed;
-  },
-
-  generateId: () => Math.random().toString(36).substr(2, 9) + Date.now()
-};
-
-export { AlchemySubmissionHandler }; // Export for type definition purposes (in a real app this would be injected or used as module exports)
+   * @param method - HTTP request method
