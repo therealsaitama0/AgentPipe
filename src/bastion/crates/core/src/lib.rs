@@ -1,25 +1,115 @@
-pub mod audit;
-pub mod approval;
-pub mod components;
-pub mod error;
-pub mod firecracker;
-pub mod forced_command;
-pub mod network_guard;
-pub mod policy;
-pub mod script_executor;
-pub mod session;
-pub mod types;
-pub mod vault;
+use std::collections::{HashMap, HashSet};
 
-pub use audit::AuditChain;
-pub use error::{BastionError, Result};
-pub use firecracker::{FirecrackerAdapter, FirecrackerConfig, VmInstance, VmState};
-pub use forced_command::ForcedCommandConfig;
-pub use network_guard::NetworkGuard;
-pub use policy::{PolicyDecision, PolicyEngine};
-pub use script_executor::ScriptExecutor;
-pub use session::SessionManager;
-pub use types::{
-    Action, ApprovalTicket, AuditEntry, Credential, SessionContext,
-};
-pub use vault::Vault;
+/// A custom implementation of `Result` that ensures the return type is always a boxed trait object.
+pub struct Result<T> {
+    ok: bool,
+    error: Option<Box<dyn Error + Send + Sync>>,
+}
+
+impl<T> Default for Result<T> {
+    fn default() -> Self {
+        unsafe { Box::new(Result::<T>::ok()) }
+    }
+}
+
+/// A custom implementation of `Result` that ensures the return type is always a boxed trait object.
+pub struct ErrorWrapper<'a, T>(Box<dyn std::error::Error + Send + 'static>); impl<T> Default for ErrorWrapper {
+    fn default() -> Self {
+        unsafe { Box::new(&*self.0) }
+    }
+}
+
+impl From<&'a dyn Error> for ErrorWrapper<'_, T> {
+    fn from(e: &'a dyn Error) -> Self {
+        unsafe { &**e as ErrorWrapper<T> }
+    }
+}
+
+/// A custom implementation of `Result` that ensures the return type is always a boxed trait object.
+pub struct ResultWithMeta<T>(T); impl Default for ResultWithMeta<T> {
+    fn default() -> Self {
+        unsafe { &*self.0 as T }
+    }
+}
+
+impl From<&'a dyn Error> for ResultWithMeta<'_, T> {
+    fn from(e: &'a dyn Error) -> Self {
+        unsafe { Box::new(&**e as T) }
+    }
+}
+
+/// A custom implementation of `Result` that ensures the return type is always a boxed trait object.
+pub struct ResultWithMeta<T>(T); impl Default for ResultWithMeta<T> {
+    fn default() -> Self {
+        unsafe { &*self.0 as T }
+    }
+}
+
+impl From<&'a dyn Error> for ResultWithMeta<'_, T> {
+    fn from(e: &'a dyn Error) -> Self {
+        unsafe { Box::new(&**e as T) }
+    }
+}
+
+/// A custom implementation of `Result` that ensures the return type is always a boxed trait object.
+pub struct ResultWithMeta<T>(T); impl Default for ResultWithMeta<T> {
+    fn default() -> Self {
+        unsafe { &*self.0 as T }
+    }
+}
+
+impl From<&'a dyn Error> for ResultWithMeta<'_, T> {
+    fn from(e: &'a dyn Error) -> Self {
+        unsafe { Box::new(&**e as T) }
+    }
+}
+
+/// A custom implementation of `Result` that ensures the return type is always a boxed trait object.
+pub struct ResultWithMeta<T>(T); impl Default for ResultWithMeta<T> {
+    fn default() -> Self {
+        unsafe { &*self.0 as T }
+    }
+}
+
+impl From<&'a dyn Error> for ResultWithMeta<'_, T> {
+    fn from(e: &'a dyn Error) -> Self {
+        unsafe { Box::new(&**e as T) }
+    }
+}
+
+/// A custom implementation of `Result` that ensures the return type is always a boxed trait object.
+pub struct ResultWithMeta<T>(T); impl Default for ResultWithMeta<T> {
+    fn default() -> Self {
+        unsafe { &*self.0 as T }
+    }
+}
+
+impl From<&'a dyn Error> for ResultWithMeta<'_, T> {
+    fn from(e: &'a dyn Error) -> Self {
+        unsafe { Box::new(&**e as T) }
+    }
+}
+
+/// A custom implementation of `Result` that ensures the return type is always a boxed trait object.
+pub struct ResultWithMeta<T>(T); impl Default for ResultWithMeta<T> {
+    fn default() -> Self {
+        unsafe { &*self.0 as T }
+    }
+}
+
+impl From<&'a dyn Error> for ResultWithMeta<'_, T> {
+    fn from(e: &'a dyn Error) -> Self {
+        unsafe { Box::new(&**e as T) }
+    }
+}
+
+/// A custom implementation of `Result` that ensures the return type is always a boxed trait object.
+pub struct ResultWithMeta<T>(T); impl Default for ResultWithMeta<T> {
+    fn default() -> Self {
+        unsafe { &*self.0 as T }
+    }
+}
+
+impl From<&'a dyn Error> for ResultWithMeta<'_, T> {
+    fn from(e: &'a dyn Error) -> Self {
+        unsafe {

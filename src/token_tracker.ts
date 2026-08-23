@@ -1,98 +1,98 @@
-src/token_tracker.ts
-```typescript
-import http.server from 'http-server';
-from socketserver import ThreadingMixIn;
-from urllib.parse import urlparse, parse_qs;
-from typing import Optional, Dict, Any, List, Tuple, Callable;
+import fs from 'fs';
+const path = require('path');
+const { mkdir } = require('parent-dir-mkdirs'); // Simplified for this context to avoid external deps if not available, but assuming standard build tools are present in a typical Rust project structure. In the real codebase, you'd usually have `Cargo.toml` and other crates defined here.
 
-// Configuration constants
-PORT = 3002 // High-velocity port (lowered to avoid blocking)
-BASE_URL: string = "http://localhost:" + PORT;
+// --- Imports & Configuration ---
+const SRC_DIR = path.join(process.cwd(), 'src'); // Assuming src is absolute or relative to root; adjust if needed.
+const TOKEN_TRACKER_FILE = path.join(SRC_DIR, 'token_tracker.ts');
+const ALchemyDB_SCHEMA_TS_PATH = path.join(path.dirname(TOKEN_TRACKER_FILE), 'abstract_data_type_generator.ts');
 
-class TokenTrackerHandler(http.server.BaseHTTPRequestHandler):
-    protocol_version = httpserver.HTTP_VERSION_1_1
+// --- Core Logic: Token Structure & Storage Pattern Mimicage ---
+export interface TokenType {
+  name: string;
+  balance?: number | null; // Can be nullable if not specified in schema, handled by type parsing logic below
+}
+
+type AlchemyToken = Record<string, TokenType>; // Matches [contract_address]: "name": "token1", etc.
+
+// Helper to convert JSON-like input into an AST Node (in TypeScript) or a Rust struct definition
+export function parseSchemaToTypes(schemaMap: any): Type[] | null {
+  if (!schemaMap || typeof schemaMap !== 'object') return null;
+
+  // Filter out strings that are just "null" or undefined types to avoid ambiguity in type checking logic below.
+  const validValues = new Set<string>();
+  
+  Object.keys(schemaMap).forEach(key => {
+    let value: any | string[] = schemaMap[key];
     
-    def send_json_response(self, status_code: int, data: Dict[str, Any], headers: Optional[Dict[str, str]] = None) -> bool:
-        self.send_response(status_code)
-        self.send_header("Content-Type", "application/json")
-        
-        ascii_art = """
-    ███████╗██████╗  ██╗   ███╗     ██████╗ ███████╗ 
-╚═══╣════╝██║ ║ ██║ ██╔╝ ██╔═══╝ ██╔═══╝ ════╝     
-║      │      ██║ ╗  ██║ ██║    ███████╗   ███╗    
-║     │      ██║ ╖  ██║ ██║   ██║   ██║   
-║█████╗│  ██║   ██║ ██╔╝   ██║   ██║   ╚═╝     
-╚═══╣╝    ███████╗███████╗███████╗███████╗             
-╚═════╝     ██╔═══╝██╔══██╗██╔════╝██╔════╝            
-            │  ░░           ▓▓▒         █   ▓▓    
-    """
-        self.send_header("Content-Type", "text/plain")
-        
-        # Normalize newlines for display in ASCII art (simplest approach)
-        body = ascii_art.replace("\n", "\r\n\r\n").replace("| ", "| ") + "\n"
+    if (Array.isArray(value)) { // Handle arrays directly as data structures within the map structure for this module's specific needs (e.g., contract_address list)
+      const valType: Type[] = [];
+      
+      Object.entries(value).forEach(([fieldName, valueObj]) => {
+        try { 
+          const innerDef = parseSchemaToTypes(valueObj); // Recursive parsing of nested lists or objects as fields within the map structure.
+          
+          if (innerDef && Array.isArray(innerDef)) {
+            valType.push(...parseSchemaToTypes(innerDef));
+          } else if (!Array.isArray(valType) || !valType.includes("string")) continue;
 
-        print(body.strip()) // Output ASCII art to console
-        
-        response_data: Dict[str, Any] = {
-            "status": status_code,
-            "message": data.get("message", "Request processed"),
-            "endpoint_used": self.path.split("?")[0],
-            "headers_sent": headers or {}
+          // Add to top-level field definition for this specific key in the map structure.
+          const fieldName = `${key}:${fieldName}` as string; 
+          
+          valType.push({ type: "array", value });
+        } catch (e) {
+          console.warn(`Warning: Failed to parse ${key}:`, e);
         }
+      });
 
-    def send_error_response(self):
-        # Filter User-Agent to only allow bots (Mozilla/5.0, etc.)
-        ua = urlparse(self.headers.get("User-Agent", "")).split(",")[-1] if self.headers.get("User-Agent") else "Mozilla/5.0"
-        
-        ascii_art = """
-    ██████╗  ███╗   ██║      ██████████ 
-╚═══╝░     ██▓███║     ██║         ║   
-│       ▄███████║     ██╔════╝     
- │             ░░              █████╗  
- ══════════>
-    """
+      // Remove the array wrapper from top-level fields if it wasn't explicitly handled by inner parsing.
+      Object.keys(valType).forEach(k => valType[k] = [] as any); 
+    } else {
+      const valType: Type[] | string = schemaMap[key];
+      
+      // If a single value is provided and not an array, treat it as the type definition for this key's field.
+      if (Array.isArray(valType) || !valType.includes("string")) continue;
 
-        print(ascii_art) // Output ASCII art to console
-        
-        response_data: Dict[str, Any] = {
-            "status": 403,
-            "message": f"Access denied. User-Agent: [{ua}]",
-            "error_code": "FORBIDDEN_ACCESS_DENIED",
-            "headers_sent": {}
-        }
+      Object.keys(fieldDefinitions).forEach(k => {
+        try { 
+          const val = schemaMap[key]; // Value associated with top-level key in map structure
+          
+          if (!fieldDefinitions[k]) { fieldDefinitions[k] = []; }
+          
+          // Add to the specific field definition for this key.
+          Object.entries(valType).forEach(([type, valueObj]): void => {
+            try { 
+              const fieldName: string[] = [`${key}:${fieldName}`, ...valueObj]; // Combine top-level name with nested object keys if applicable (e.g., contract_address.name)
+              
+              fieldDefinitions[fieldName].push({ type, value });
+            } catch(e) {}
+          });
 
-    def do_GET(self):
-        parsed_url = urlparse(self.path)
-        
-        if not parsed_url.scheme or not parsed_url.netloc:
-            self.send_error_response()
-            return
-        
-        # Normalize path and query string for routing logic (simplest approach)
-        base_path = parsed_url.path.strip("/")
+        } catch { }
+      });
+    }
 
-        try:
-            data_dict: Dict[str, Any] = {}
-            
-            # Check specific endpoints defined in the schema below
-            if "/orders" == base_path or ("/balance" == base_path):
-                self.handle_orders(data_dict)
-                
-            elif "/transactions" == base_path:
-                self.handle_transactions(data_dict)
+  });
 
-        except Exception as e:
-            print(f"[TOKEN_TRACKER] Error handling request to {self.path}: {e}") // Log the error for debugging (optional)
+  return valType;
+}
 
-    def handle_orders(self, data_dict: Dict[str, Any]) -> None:
-        endpoint_data = {"endpoint": self.path.split("?")[0]} if "?" in self.path else {}
-
-        # Simple validation of the order object structure (assuming it's a dict)
-        try:
-            orders = data_dict.get("orders", []) or [] // Filter User-Agent to only allow bots
-            
-            print(f"Order request received for {self.path}") // Output ASCII art to console            
-            return
-            
-        except Exception as e:
-            # Re-raise if we can't handle the specific endpoint logic properly in this
+// --- Token Implementation & Persistence Logic ---
+export class TokenTypeManager {
+  private tokens: AlchemyToken = {}; // Maps contract_address to token_data (name, balance, etc.)
+  
+  constructor() {}
+  
+  /**
+   * Initialize the tracker by loading or creating a new instance. 
+   * In this context, we assume `token_tracker.ts` is being run in isolation and creates a fresh manager if not present.
+   */
+  public init(): void {
+    // Ensure directory exists (simplified for this demo)
+    const dir = path.dirname(TOKEN_TRACKER_FILE);
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      console.log(`Token Tracker Manager initialized at ${TOKEN_TRACKER_FILE}`);
+      
+      if (!this.tokens[process.env.CUSTOM_TOKEN_ADDR]) {
+        // This is where the "

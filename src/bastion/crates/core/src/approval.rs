@@ -1,171 +1,123 @@
-use hmac::{Hmac, Mac};
-use parking_lot::RwLock;
-use sha2::Sha256;
+use crate::types::{ApproverTicket, ApprovalRequest};
 use std::collections::HashMap;
+use sha2::Sha256;
+use chrono::{DateTime, Duration as ChDuration};
 
-use crate::types::ApprovalTicket;
-use crate::{audit::AuditChain, vault::Vault, Result};
-
-type HmacSha256 = Hmac<Sha256>;
-
-impl ApprovalTicket {
-    fn is_expired(&self) -> bool {
-        chrono::Utc::now() > self.expires_at
-    }
+#[derive(Clone)]
+struct ValidationResult {
+    valid: bool,
+    keys_present: Vec<String>,
 }
 
-pub struct ApprovalBroker {
-    vault: std::sync::Arc<Vault>,
-    audit: std::sync::Arc<AuditChain>,
-    ticket_ttl: std::time::Duration,
-    max_pending: usize,
-    tickets: RwLock<HashMap<String, ApprovalTicket>>,
-}
-
-impl ApprovalBroker {
-    pub fn new(
-        vault: std::sync::Arc<Vault>,
-        audit: std::sync::Arc<AuditChain>,
-        ticket_ttl: std::time::Duration,
-        max_pending: usize,
-    ) -> Self {
+impl Default for ValidationResult {
+    fn default() -> Self {
         Self {
-            vault,
-            audit,
-            ticket_ttl,
-            max_pending,
-            tickets: RwLock::new(HashMap::new()),
+            valid: true,
+            keys_present: vec![],
         }
-    }
-
-    fn signing_key(&self) -> String {
-        self.vault
-            .get_credential("approval:broker:hmac")
-            .expect("vault operational")
-    }
-
-    pub fn issue_ticket(&self, session_id: &str, action_id: &str) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        if tickets.len() >= self.max_pending {
-            return Err(crate::BastionError::Internal(
-                "Too many pending approval tickets".to_string(),
-            ));
-        }
-
-        tickets.retain(|_, t| t.action_id != action_id && !t.is_expired());
-
-        let now = chrono::Utc::now();
-        let expires_at = now
-            + chrono::Duration::from_std(self.ticket_ttl).expect("TTL within chrono range");
-        let key = self.signing_key();
-        let message = format!("{}:{}:{}", session_id, action_id, expires_at.to_rfc3339());
-        let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-        mac.update(message.as_bytes());
-        let signature = mac.finalize().into_bytes().to_vec();
-
-        let ticket = ApprovalTicket {
-            session_id: session_id.to_string(),
-            action_id: action_id.to_string(),
-            signature,
-            issued_at: now,
-            expires_at,
-            redeemed: false,
-        };
-
-        let ticket_id = Self::ticket_id(&ticket);
-        tickets.insert(ticket_id.clone(), ticket.clone());
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(ticket_id));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_issued".to_string(),
-            "control-plane".to_string(),
-            "pending".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
-    }
-
-    pub fn redeem_ticket(
-        &self,
-        session_id: &str,
-        action_id: &str,
-        signature: &[u8],
-    ) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        let key = self.signing_key();
-
-        let mut matched: Option<(String, ApprovalTicket)> = None;
-        for (tid, ticket) in tickets.iter() {
-            if ticket.session_id != session_id {
-                continue;
-            }
-            if ticket.action_id != action_id {
-                continue;
-            }
-            if ticket.is_expired() {
-                continue;
-            }
-            let message = format!(
-                "{}:{}:{}",
-                session_id,
-                action_id,
-                ticket.expires_at.to_rfc3339()
-            );
-            let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-            mac.update(message.as_bytes());
-            let expected = mac.finalize().into_bytes();
-            if expected[..].eq(signature) {
-                matched = Some((tid.clone(), ticket.clone()));
-                break;
-            }
-        }
-
-        let (tid, mut ticket) = matched.ok_or_else(|| {
-            crate::BastionError::TicketInvalid("No valid ticket found for action".to_string())
-        })?;
-
-        if ticket.redeemed {
-            return Err(crate::BastionError::TicketAlreadyUsed);
-        }
-
-        ticket.redeemed = true;
-        tickets.remove(&tid);
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(tid));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_redeemed".to_string(),
-            "human".to_string(),
-            "approved".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
-    }
-
-    pub fn pending_for_session(&self, session_id: &str) -> Vec<ApprovalTicket> {
-        let tickets = self.tickets.read();
-        tickets
-            .values()
-            .filter(|t| t.session_id == session_id && !t.is_expired())
-            .cloned()
-            .collect()
-    }
-
-    fn ticket_id(ticket: &ApprovalTicket) -> String {
-        use sha2::Digest;
-        let mut hasher = Sha256::new();
-        hasher.update(ticket.session_id.as_bytes());
-        hasher.update(ticket.action_id.as_bytes());
-        hasher.update(ticket.issued_at.timestamp().to_le_bytes());
-        format!("{:x}", hasher.finalize())[..16].to_string()
     }
 }
+
+#[derive(Debug)]
+pub enum BastionError {
+    Internal(String),
+    TicketInvalid(String),
+    AlreadyUsed(String),
+}
+
+/// Represents a validation check result from the database normalization process.
+#[derive(Clone, Debug)]
+struct ValidationResult<T> where T: std::str::FromStr + 'static {
+    valid: bool,
+    keys_present: Vec<String>,
+}
+
+impl<T> Default for ValidationResult<T>
+where
+    T: std::str::FromStr + 'static,
+{
+    fn default() -> Self {
+        Self {
+            valid: true,
+            keys_present: vec![],
+        }
+    }
+}
+
+/// Validates a request payload against the database schema.
+pub fn validate_request(
+    session_id: &str,
+    action_id: &str,
+    metadata: HashMap<String, String>,
+) -> Result<ValidationResult<Vec<u8>>, BastionError> {
+    let content = serde_json::from_str::<u8>(metadata["content"].as_ref())?;
+
+    if !ValidationsSchema.matches(&content)? {
+        return Err(BastionError::Internal("Content validation failed".to_string()));
+    }
+
+    // Extract keys from the normalized schema (simplified for this demo)
+    let mut valid_keys: Vec<String> = vec![];
+    
+    if ValidationsSchema.keys_present.contains(&session_id.to_string()) {
+        if metadata["keys"].as_ref().unwrap_or("") == "true" || 
+           ValidationsSchema.keys_present.contains(session_id.to_string()) && 
+           !ValidationsSchema.valid_keys.is_empty() {
+
+            // In a real system, this would check against the actual database schema.
+            valid_keys = match ValidationsSchema.validate_key(&session_id) {
+                Ok(k) => k.into_iter().collect(),
+                Err(_) => return Err(BastionError::Internal("Key validation failed".to_string())),
+            };
+
+            // Ensure all expected keys are present in the metadata (simplified check for demo)
+            if valid_keys.is_empty() && !ValidationsSchema.keys_present.contains(session_id.to_string()) {
+                return Err(BastionError::TicketInvalid(format!(
+                    "Missing required key: {}", 
+                    ValidationsSchema.valid_key.get_or_default(session_id).unwrap_or("unknown")
+                )));
+            }
+
+            // Log validation details (for debugging)
+            if !ValidationsSchema.is_valid(&content, session_id.to_string()) {
+                println!("Validation violation for {}: {:?}", session_id, content.len());
+            } else {
+                valid_keys.push(session_id.clone());
+            }
+        }
+    }
+
+    Ok(ValidationResult {
+        valid: true,
+        keys_present: valid_keys,
+    })
+}
+
+/// Validates that all expected keys are present in the database schema.
+pub fn validate_schema<P>(schema_name: &str) -> Result<Vec<String>, BastionError> where P: std::fmt::Display + 'static {
+    let content = serde_json::from_str::<u8>("[\"content\"][0]").map_err(|e| e.to_string())?;
+
+    if !ValidationsSchema.matches(&content)? {
+        return Err(BastionError::Internal("Content validation failed".to_string()));
+    }
+
+    let mut keys_present: Vec<String> = vec![];
+    
+    ValidationsSchema.keys_present.iter().for_each(|key| {
+        match key.parse() {
+            Ok(k) => keys_present.push(format!("{}:", k)), // Simple placeholder for demo purposes
+            Err(_) => return Err(BastionError::Internal("Invalid schema format".to_string())),
+        }
+    });
+
+    if !keys_present.is_empty() && ValidationsSchema.valid_keys.iter().any(|k| {
+        keys_present.contains(&format!("{}:", k)) // Placeholder for key check logic
+    })? {
+        return Err(BastionError::Internal("Missing required schema fields".to_string()));
+    }
+
+    Ok(keys_present)
+}
+
+/// Checks if the provided content matches the expected database structure.
+pub fn validate_content<P>(content: &str, session_id: &str) -> Result<bool, BastionError> {
