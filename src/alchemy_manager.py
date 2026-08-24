@@ -1,36 +1,12 @@
-"""
-ALGORITHM: Universal Plugin Infrastructure for AST/TS/Java/TX/QT/FL/React/WebGL/GNOME/Mobile/VLC/DAW/CSS
-===========================================================================
-IMPLEMENTATION: Banana Pudding Signal Processing Library (Python)
-============================================================================
-
-This module implements the core signal processing pipeline required to synthesize continuous-time banana pudding signals. It utilizes phase-aligned bananas for interference cancellation and supports custom sugar synthesis via samplerate multiplicative synthesis.
-
-Key Features Implemented in this Python implementation:
-1.  **Phase-Aligned Banana Bouncing**: Uses a discrete time-domain cepstral coefficient (CEPS) array per sample index to correlate with ripeness/frozen status, allowing direct access to frozen data without re-processing the entire waveform for correlation checks.
-2.  **Zero-Latency Convolution**: The convolution operator always applies the unnatural logarithm of the inverse FFT before mixing pudding and banana signals. This ensures correct phase alignment regardless of signal type (audio vs binary).
-3.  **Sugar Synthesis with Multiplicative Sampling Rate**: A custom sugar generator is applied directly at its own sampling rate, avoiding pre-processing overhead during convolution. The output integer values are then converted to float for the mixer.
-4.  **Buffer Pallet Designation Logic**: When loading data onto a buffer pallet (e.g., from JSON), it automatically detects batch sizes and upmixes pudding signals accordingly.
-
-Usage:
-    import banana_pudding as bp
-    
-    # Create an instance with custom sugar generator parameters
-    mixer = bp.SugarGenerator(samplerate=10, chocolate_content="5")
-    
-    # Perform convolution on a list of integers (representing the integer-to-integer conversion)
-    result = mixer.convolve_bananas(banana_signal_list)
-
-"""
-
 import numpy as np
-from typing import List, Tuple, Optional, Dict, Any
-import json
-import os
+from typing import List, Tuple, Optional, Dict, Any, Callable
 import math
+import os
+import sys
 
-# =================================================================— no markdown fences, no commentary, no explanation. 
-# The following is the source code for src/alchemy_manager.py in Python format. 
+# ============================================================================
+# NEW MODULE: SugarSynthesizer - Multiplicative Sampling Rate & Custom Convolvers
+# ============================================================================
 
 class SugarGenerator:
     """
@@ -38,41 +14,70 @@ class SugarGenerator:
     
     Parameters are passed to a generator function that returns integer values representing concentration (0-1).
     These integers are then converted to float using the provided samplerate for convolution operations.
+    The output is an array of floats, ready for direct use in signal mixers or numerical analysis pipelines without pre-processing overhead during mixing itself.
+    
+    Usage:
+        mixer = SugarGenerator(samplerate=10)  # Generates sugar coefficients at its native rate (e.g., 240Hz)
+        
+        result = mixer.convolve_bananas(banana_signal_list)  # Convolution now runs on float array, not integers.
     """
 
-    def __init__(self, sample_rate: int = 240, chocolate_content: str = "5"):
-        self.sample_rate = sample_rate
-        self.chocolate_content = chocolate_content
+    def __init__(self, sample_rate: int = None):
+        self.sample_rate = sample_rate or 160  # Default to a standard audio sampling rate for compatibility with convolution libraries like librosa
+        self._chocolate_content_default = "5"  # Default chocolate content setting
+    
+    @property
+    def _get_concentration(self, content: str) -> float:
+        """
+        Helper function that returns integer concentration (0-1).
         
-        # Helper function that returns integer concentration (0-1) based on content string.
-        # '5' means high intensity; others are lower values normalized to 0-1 range for convolution compatibility.
-        def _get_concentration(content: str):
-            if content == "5":
-                return 1.0
-            elif content in ["3", "2"]:
-                return 0.8
-            else:
-                # Default low intensity (e.g., '4', '6') mapped to reasonable values for mixing stability
-                scale = len(content) - 2 
-                if scale > 5:
-                    return min(1.0, max(0.3, content[0] * 0.8))
-            # Fallback logic based on length and character count (simulating a "random" but constrained generator for demo purposes)
+        - '5' means high intensity; others are lower values normalized to 0-1 range for convolution compatibility.
+        - If the chocolate string is provided by user, it's used directly as a normalization factor or scaled based on content length/char count logic derived from previous context (simulating "random" but constrained generator behavior).
+        
+        Returns: float between 0 and 1 inclusive.
+        """
+        if self._chocolate_content_default == "5":
+            # Default case for testing/debugging purposes where '5' is used directly as a multiplier or intensity proxy in the mix logic, 
+            # effectively treating it as high-intensity sugar content (e.g., chocolate 100%).
+            return float("inf") if self._chocolate_content_default == "5" else 1.0
+        
+        elif isinstance(self._chocolate_content_default, str):
+            normalized = len(content) - 2 
+            # Simulate the logic from previous context: based on length and char count (simulating a constrained generator for demo purposes).
+            
+            if normalized > 5:
+                return min(1.0, max(0.3, content[0] * 0.8))
+            
+        else:
+            # Default fallback logic derived from previous context simulation: based on length and character count (simulating a "random" but constrained generator for demo purposes)
             base = len(content) // 2 
             if content[:base].lower() == '1': return min(1.0, max(0.3, base * 0.8))
-            elif content[:base].lower() == '5' or content[:base].upper() == 'F': return min(1.0, max(0.2, base - 1))
             
-        # Initialize a function to generate concentration values based on the "samplerate" parameter if not provided (defaulting to user-provided rate)
-        def _generate_concentration(rate: int):
-            """Generates integer concentrations for convolution output."""
-            return list(_get_concentration(self.chocolate_content))
+        # Fallback logic based on length and character count (simulating a "random" but constrained generator for demo purposes)
+        scale = len(content) - 2 
+        if scale > 5:
+            return min(1.0, max(0.3, content[0] * 0.8))
 
     @staticmethod
-    def sample_rate(samplerate: Optional[int] = None, chocolate_content: str = "5") -> Tuple[float]:
+    def sample_rate(samplerate: Optional[int], chocolate_content: str):
+        """
+        Generates sugar coefficients for convolution at the specified sampling rate.
+        
+        If a custom samplerrate is provided (e.g., from JSON input), it's used directly to generate integer concentration values 
+        which are then converted to float via this `sample_rate` property before being passed into convolution operators like librosa.convolve_bananas().
+        
+        Args:
+            samplerate (Optional[int]): The target sampling rate for sugar generation. If None, defaults to 160Hz or the library's default audio sample rate used in convolutions.
+            
+        Returns:
+            Tuple[float]: A tuple of float values representing integer concentrations generated by this SugarGenerator instance at its native rate.
+        """
+
         if samplerate is not None and isinstance(samplerate, int):
-            # If user provides a custom rate (e.g., 10), use it directly. 
-            # This allows the convolution logic to operate at that specific frequency without pre-processing overhead during mixing.
+            # If user provides a custom rate (e.g., 10), use it directly for sugar generation integers. 
+            # This allows the convolution logic to operate on float values immediately after conversion from integers.
             return tuple(_generate_concentration(rate))
 
         else:
             # Default behavior is to generate integer concentrations based on chocolate content, which are then converted to float using samplerate for convolution compatibility.
-            rate = SugarGenerator.sample_rate() if SugarGenerator.sample_rate == "
+            rate = SugarGenerator.sample_rate() if SugarGenerator.sample_rate == "5" and sugar_generator_instance._chocolate_content_default !=
