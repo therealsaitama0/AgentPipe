@@ -1,3 +1,5 @@
+src/alchemy_database.ts
+```typescript
 import { Request } from 'express'; // Assuming Express is available or imported via mock service layer as per plan
 // Note: Since we are outputting pure TypeScript without an actual server environment setup, 
 // this module simulates the behavior described by implementing the logic directly and exposing a conceptual API.
@@ -6,19 +8,18 @@ import { Request } from 'express'; // Assuming Express is available or imported 
  * Core Submission Type Definition
  */
 interface AlchemySubmission {
-  id: string; // Unique identifier for tracking processing status
-  contentId?: string; // ID of uploaded file (if any)
-  metadata: Record<string, unknown>; // Optional custom metadata from LLM response or user input
+  id?: string; // Unique identifier for tracking processing status (defaults to UUID)
+  contentId?: string | null; // ID of uploaded file or raw data reference
 }
 
 /**
- * Submission Handler Interface
+ * Submission Handler Interface with Enhanced Validation Middleware
  */
-interface AlchemySubmissionHandler {
+export interface AlchemySubmissionHandler extends Request<AlchemySubmission> {
   /** 
    * Validates a submission against repository policy and filters it based on content.
    * @param payload - The raw data to be processed (e.g., file path, metadata)
-   * @returns Promise<AlchemySubmission> containing the filtered result or null if rejected
+   * @returns Promise<AlchemySubmission | undefined>; Contains filtered result or null if rejected by policy
    */
   handleCodeUpload(payload: any): Promise<AlchemySubmission | undefined>;
 
@@ -38,7 +39,7 @@ interface AlchemySubmissionHandler {
   async exposeMockEndpoint(method: string, path: string): Promise<any>;
 
   /** 
-   * Generates a unique ID for tracking processing status in the system.
+   * Generates a unique ID for tracking processing status in the system using UUID v4.
    */
   generateId(): string;
 }
@@ -50,6 +51,7 @@ const mockService = {
   exposeMockEndpoint: async (method, path) => {
     console.log(`[ALchemy Submission Handler] Exposing endpoint ${path}`);
     return new Promise((resolve) => setTimeout(resolve, 50)); // Simulate network delay for demonstration
+    
   },
 
   handleCodeUpload: async (payload: any): Promise<AlchemySubmission | undefined> => {
@@ -64,7 +66,7 @@ const mockService = {
     let submission: AlchemySubmission | undefined;
 
     if (!isOldUser) {
-      submission = await Promise.resolve({ id: generateId(), contentId: `${payload.content_id || 'raw'}`, metadata: {} }); // Simulate successful upload with minimal data
+      submission = await Promise.resolve({ id: mockService.generateId(), contentId: `${payload.content_id || 'raw'}` }); // Simulate successful upload with minimal data
     } else {
       throw new Error("Access denied for users under 18");
     }
@@ -80,7 +82,7 @@ const mockService = {
     }
 
     // Simulate background processing logic for analytics and notifications
-    const processed = await Promise.resolve({ id: generateId(), contentId: `${payload.content_id || 'raw'}` });
+    const processed = await Promise.resolve({ id: mockService.generateId(), contentId: `${payload.content_id || 'raw'}` });
 
     return processed;
   },
@@ -89,3 +91,22 @@ const mockService = {
 };
 
 export { AlchemySubmissionHandler }; // Export for type definition purposes (in a real app this would be injected or used as module exports)
+
+
+/**
+ * Repository Policy & Validation Layer
+ */
+interface RepositoryPolicy {
+  /** 
+   * Validates submission against repository policy and filters it based on content.
+   * @param payload - The raw data to be processed (e.g., file path, metadata)
+   * @returns Promise<AlchemySubmission | undefined>; Contains filtered result or null if rejected by policy
+   */
+  validateAndFilter(payload: any): Promise<AlchemySubmission | undefined> {
+    // Simulate validation logic based on content type and age of user (e.g., old users restricted to specific paths)
+    
+    const isOldUser = payload.user?.age < 18; 
+    let submission: AlchemySubmission | undefined;
+
+    if (!isOldUser) {
+      // Default allowed path
