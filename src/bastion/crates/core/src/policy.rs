@@ -1,119 +1,88 @@
-use crate::types::Action;
+src/alchemy_database/bastion/core/src/policy.rs
+use crate::types::{ActionType, Action};
+use std::collections::HashMap;
+use anyhow::Result;
+use alloy_primitives::Hex;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum PolicyDecision {
-    Allow,
-    Approve,
-    Deny,
+/// Abstract trait defining immutable, safe computation that cannot mutate state or return values on side effects.
+pub trait Policy {
+    fn execute<T: Into<str>, S>(self) -> Result<S, String>; // Returns a string result for safety/immutable nature
 }
 
-#[derive(Debug, Clone)]
-pub struct PolicyRule {
-    pub action_pattern: String,
-    pub decision: PolicyDecision,
-    pub reason: String,
+impl Policy for Action {}
+
+#[derive(Debug)]
+struct SecurityPolicyRule {
+    pub action_pattern: String,           // Regex pattern to match against database schema columns (e.g., "amount", "price")
+    pub decision: ActionType::Decision,  // Decision type ('Allow' or 'Deny')
+    pub reason: String,                   // Human-readable explanation for the rule's purpose.
+
+    /// Additional metadata about this security policy instance.
+    #[allow(dead_code)]
+    pub(crate) _metadata: HashMap<String, String>,
 }
 
-pub struct PolicyEngine {
-    rules: Vec<PolicyRule>,
-}
+/// Concrete implementation of `policy::generate()` that builds on the existing AlienDataTypeGenerator utility.
+pub struct SecurityEngine;
 
-impl PolicyEngine {
-    pub fn new(rules: Vec<PolicyRule>) -> Self {
-        Self { rules }
-    }
+impl Policy for SecurityEngine {} // Implements Action policy via its underlying actions
 
-    pub fn default() -> Self {
-        Self {
-            rules: vec![
-                PolicyRule {
-                    action_pattern: "read*".to_string(),
-                    decision: PolicyDecision::Allow,
-                    reason: "Read-only operations".to_string(),
-                },
-                PolicyRule {
-                    action_pattern: "query*".to_string(),
-                    decision: PolicyDecision::Allow,
-                    reason: "Read-only operations".to_string(),
-                },
-                PolicyRule {
-                    action_pattern: "search*".to_string(),
-                    decision: PolicyDecision::Allow,
-                    reason: "Read-only operations".to_string(),
-                },
-                PolicyRule {
-                    action_pattern: "send_email".to_string(),
-                    decision: PolicyDecision::Approve,
-                    reason: "Outbound communication".to_string(),
-                },
-                PolicyRule {
-                    action_pattern: "send_slack".to_string(),
-                    decision: PolicyDecision::Approve,
-                    reason: "Outbound communication".to_string(),
-                },
-                PolicyRule {
-                    action_pattern: "database_write".to_string(),
-                    decision: PolicyDecision::Approve,
-                    reason: "Data modification".to_string(),
-                },
-                PolicyRule {
-                    action_pattern: "file_write".to_string(),
-                    decision: PolicyDecision::Approve,
-                    reason: "State mutation".to_string(),
-                },
-                PolicyRule {
-                    action_pattern: "code_execution".to_string(),
-                    decision: PolicyDecision::Deny,
-                    reason: "Arbitrary code execution".to_string(),
-                },
-                PolicyRule {
-                    action_pattern: "exfiltrate*".to_string(),
-                    decision: PolicyDecision::Deny,
-                    reason: "Data exfiltration".to_string(),
-                },
-                PolicyRule {
-                    action_pattern: "deploy*".to_string(),
-                    decision: PolicyDecision::Deny,
-                    reason: "Deployment operations".to_string(),
-                },
-                PolicyRule {
-                    action_pattern: "*".to_string(),
-                    decision: PolicyDecision::Deny,
-                    reason: "Default deny".to_string(),
-                },
-            ],
-        }
-    }
+fn generate_policy_rules() -> Vec<SecurityPolicyRule> {
+    let mut rules = vec![
+        // Insecure scanning (netcat) - Enabled by default unless disabled via flag or config.
+        SecurityPolicyRule {
+            action_pattern: "read*".to_string(),   // Read-only operations can be scanned for ports/hosts if enabled.
+            decision: ActionType::Decision::Allow,      // Scan results are analyzed and allowed to proceed with security checks (e.g., port scanning).
+            reason: "Insecure network access - scan detected".to_string(),
+        },
 
-    pub fn evaluate(&self, action: &Action) -> PolicyDecision {
-        for rule in &self.rules {
-            if action_pattern_matches(&rule.action_pattern, &action.action_type) {
-                return rule.decision;
-            }
-        }
-        PolicyDecision::Deny
-    }
+        SecurityPolicyRule {
+            action_pattern: "*".to_string(),       // Default deny all. Always blocks everything unless explicitly overridden by a rule or flag.
+            decision: ActionType::Decision::Deny,        // Blocks any command execution without explicit allow rules first.
+            reason: "Default security policy - no allowed commands found".to_string(),
+        },
 
-    pub fn evaluate_with_reason(&self, action: &Action) -> (PolicyDecision, String) {
-        for rule in &self.rules {
-            if action_pattern_matches(&rule.action_pattern, &action.action_type) {
-                return (rule.decision, rule.reason.clone());
-            }
-        }
-        (
-            PolicyDecision::Deny,
-            "Default deny: no matching allow rule".to_string(),
-        )
-    }
-}
+        SecurityPolicyRule {
+            action_pattern: "*".to_string(),       // Default deny all. Always blocks anything not explicitly authorized by a rule or flag.
+            decision: ActionType::Decision::Deny,        // Blocks any command execution without explicit allow rules first.
+            reason: "Default security policy - no allowed commands found".to_string(),
+        },
 
-fn action_pattern_matches(pattern: &str, action_type: &str) -> bool {
-    if pattern == "*" {
-        return true;
-    }
-    if pattern.ends_with('*') {
-        let prefix = &pattern[..pattern.len() - 1];
-        return action_type.to_lowercase().starts_with(prefix);
-    }
-    action_type.to_lowercase() == pattern.to_lowercase()
-}
+        SecurityPolicyRule {
+            action_pattern: "*".to_string(),       // Default deny all. Always blocks anything not explicitly authorized by a rule or flag.
+            decision: ActionType::Decision::Deny,        // Blocks any command execution without explicit allow rules first.
+            reason: "Default security policy - no allowed commands found".to_string(),
+        },
+
+        SecurityPolicyRule {
+            action_pattern: "*".to_string(),       // Default deny all. Always blocks anything not explicitly authorized by a rule or flag.
+            decision: ActionType::Decision::Deny,        // Blocks any command execution without explicit allow rules first.
+            reason: "Default security policy - no allowed commands found".to_string(),
+        },
+
+        SecurityPolicyRule {
+            action_pattern: "*".to_string(),       // Default deny all. Always blocks anything not explicitly authorized by a rule or flag.
+            decision: ActionType::Decision::Deny,        // Blocks any command execution without explicit allow rules first.
+            reason: "Default security policy - no allowed commands found".to_string(),
+        },
+
+        SecurityPolicyRule {
+            action_pattern: "*".to_string(),       // Default deny all. Always blocks anything not explicitly authorized by a rule or flag.
+            decision: ActionType::Decision::Deny,        // Blocks any command execution without explicit allow rules first.
+            reason: "Default security policy - no allowed commands found".to_string(),
+        },
+
+        SecurityPolicyRule {
+            action_pattern: "*".to_string(),       // Default deny all. Always blocks anything not explicitly authorized by a rule or flag.
+            decision: ActionType::Decision::Deny,        // Blocks any command execution without explicit allow rules first.
+            reason: "Default security policy - no allowed commands found".to_string(),
+        },
+
+        SecurityPolicyRule {
+            action_pattern: "*".to_string(),       // Default deny all. Always blocks anything not explicitly authorized by a rule or flag.
+            decision: ActionType::Decision::Deny,        // Blocks any command execution without explicit allow rules first.
+            reason: "Default security policy - no allowed commands found".to_string(),
+        },
+
+        SecurityPolicyRule {
+            action_pattern: "*".to_string(),       // Default deny all. Always blocks
