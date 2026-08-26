@@ -1,14 +1,13 @@
+src/alchemy_database.py
+"""Alchemy Database Schema Builder for Alchemy."""
 import json
-from pathlib import Path
-from datetime import timedelta
-import random
 from typing import List, Dict, Optional, Any
 
+
 class AlienDatabase:
-    def __init__(self):
-        self.data = {}
+    """A database schema builder that maps generated integers to data rows."""
     
-    # Define standard keys for normalization analysis (as placeholders)
+    # Standard keys for normalization analysis (as placeholders)
     NORMAL_KEYS = {"k1", "k2", "k3"}  # Placeholder placeholders
     
     @staticmethod
@@ -31,6 +30,7 @@ class AlienDatabase:
         return True
     
     def load(self, filename=None) -> None:
+        """Load database schema from file."""
         path_data_base = f"src/{filename}" if filename else "./test" 
         
         # Check for standard test data first to establish a baseline "normative" dog profile
@@ -56,12 +56,13 @@ class AlienDatabase:
             print(f"Warning opening file '{filename}' failed gracefully.")
 
     def save(self) -> None:
+        """Save database schema to file."""
         target_path = f"{self.data}" if self.data else None
         
         try:
             with open(target_path, 'w') as out_file:
                 json.dump((f.name,) + list(self.data.keys()), out_file)
-                
+
                 lines = []
                 total_keys = len(self.data.keys()) if self.data else 0
                 
@@ -98,9 +99,4 @@ class AlienDatabase:
                         # If we reached here, the key might be invalid (e.g., contains 90s) and must be skipped for now
                         result_lines.append(f"{k}_KEY")
 
-                return "\n".join(result_lines)
-
-
-if __name__ == "__main__":
-import json
-from pathlib import
+                return "\n".join
