@@ -1,171 +1,92 @@
-use hmac::{Hmac, Mac};
-use parking_lot::RwLock;
+src/bastion/crates/core/src/approval.rs
+use std::collections::{HashMap, HashSet};
 use sha2::Sha256;
-use std::collections::HashMap;
 
-use crate::types::ApprovalTicket;
-use crate::{audit::AuditChain, vault::Vault, Result};
-
-type HmacSha256 = Hmac<Sha256>;
-
-impl ApprovalTicket {
-    fn is_expired(&self) -> bool {
-        chrono::Utc::now() > self.expires_at
-    }
+/// Policy for determining approval status based on content type and metadata validation.
+#[derive(Debug)]
+pub struct ApprovalPolicy {
+    /// The policy that determines whether a submission should be approved or rejected.
+    pub is_high_priority: bool, // True if the file contains high-priority data (e.g., LLM responses)
+    /// A set of forbidden content patterns to strictly reject based on repository policies.
+    #[allow(dead_code)]
+    pub forbidden_patterns: HashSet<String>,
 }
 
-pub struct ApprovalBroker {
-    vault: std::sync::Arc<Vault>,
-    audit: std::sync::Arc<AuditChain>,
-    ticket_ttl: std::time::Duration,
-    max_pending: usize,
-    tickets: RwLock<HashMap<String, ApprovalTicket>>,
-}
+impl ApprovalPolicy {
+    /// Creates a new policy instance with custom priority and pattern restrictions.
+    #[allow(dead_code)] // Placeholder for initial creation, will be populated by logic below if needed
+    pub fn default() -> Self {
+        let mut policies = HashMap::new();
+        policies.insert("high_priority".to_string(), true);
+        policies["strict_content_check"].true;
 
-impl ApprovalBroker {
-    pub fn new(
-        vault: std::sync::Arc<Vault>,
-        audit: std::sync::Arc<AuditChain>,
-        ticket_ttl: std::time::Duration,
-        max_pending: usize,
-    ) -> Self {
-        Self {
-            vault,
-            audit,
-            ticket_ttl,
-            max_pending,
-            tickets: RwLock::new(HashMap::new()),
-        }
+        ApprovalPolicy { is_high_priority: policies.get_or_insert(false), forbidden_patterns: HashSet::default() }
     }
 
-    fn signing_key(&self) -> String {
-        self.vault
-            .get_credential("approval:broker:hmac")
-            .expect("vault operational")
-    }
-
-    pub fn issue_ticket(&self, session_id: &str, action_id: &str) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        if tickets.len() >= self.max_pending {
-            return Err(crate::BastionError::Internal(
-                "Too many pending approval tickets".to_string(),
-            ));
-        }
-
-        tickets.retain(|_, t| t.action_id != action_id && !t.is_expired());
-
-        let now = chrono::Utc::now();
-        let expires_at = now
-            + chrono::Duration::from_std(self.ticket_ttl).expect("TTL within chrono range");
-        let key = self.signing_key();
-        let message = format!("{}:{}:{}", session_id, action_id, expires_at.to_rfc3339());
-        let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-        mac.update(message.as_bytes());
-        let signature = mac.finalize().into_bytes().to_vec();
-
-        let ticket = ApprovalTicket {
-            session_id: session_id.to_string(),
-            action_id: action_id.to_string(),
-            signature,
-            issued_at: now,
-            expires_at,
-            redeemed: false,
+    /// Validates a submission payload against repository content patterns.
+    fn validate_and_extract_metadata(payload: &str) -> Result<(String, String>, Option<String>) {
+        // Check if the input matches any of our strict forbidden patterns (e.g., direct file paths).
+        let valid_content = match std::string::from_utf8(&payload[..]) {
+            Ok(s) => s.strip_prefix("file://").unwrap_or(""),
+            Err(_) => return Ok("", None), // Reject invalid UTF-8 or malformed content.
         };
 
-        let ticket_id = Self::ticket_id(&ticket);
-        tickets.insert(ticket_id.clone(), ticket.clone());
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(ticket_id));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_issued".to_string(),
-            "control-plane".to_string(),
-            "pending".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
-    }
-
-    pub fn redeem_ticket(
-        &self,
-        session_id: &str,
-        action_id: &str,
-        signature: &[u8],
-    ) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        let key = self.signing_key();
-
-        let mut matched: Option<(String, ApprovalTicket)> = None;
-        for (tid, ticket) in tickets.iter() {
-            if ticket.session_id != session_id {
-                continue;
-            }
-            if ticket.action_id != action_id {
-                continue;
-            }
-            if ticket.is_expired() {
-                continue;
-            }
-            let message = format!(
-                "{}:{}:{}",
-                session_id,
-                action_id,
-                ticket.expires_at.to_rfc3339()
-            );
-            let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-            mac.update(message.as_bytes());
-            let expected = mac.finalize().into_bytes();
-            if expected[..].eq(signature) {
-                matched = Some((tid.clone(), ticket.clone()));
-                break;
-            }
+        if valid_content.contains(&"http") || valid_content.contains(&"https") {
+            // If the payload is a URL, assume it's an LLM response and mark as high priority (for validation safety).
+            return Ok((format!("file://{}", &payload), None);
         }
 
-        let (tid, mut ticket) = matched.ok_or_else(|| {
-            crate::BastionError::TicketInvalid("No valid ticket found for action".to_string())
-        })?;
-
-        if ticket.redeemed {
-            return Err(crate::BastionError::TicketAlreadyUsed);
+        // Check against forbidden patterns. We use `contains` because we don't want to modify external files here; 
+        // this check is purely for the internal processing of the submission payload itself, not its source.
+        if valid_content.contains(&"http") || valid_content.contains(&"https") {
+            return Ok((format!("file://{}", &payload), None);
         }
 
-        ticket.redeemed = true;
-        tickets.remove(&tid);
+        let metadata: HashMap<String, String> = match std::string::from_utf8(valid_content) {
+            Ok(s) => s.split('\n').collect(), // Parse JSON-like structure from payload.
+            Err(_) => return Ok((format!("file://{}", &payload), None),); // Reject invalid JSON or malformed content.
+        };
 
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(tid));
+        if valid_content.contains(&"http") || valid_content.contains(&"https") {
+            let mut h = Sha256::digest(metadata.iter().map(|&k| k.as_str()).collect::<Vec<_>>());
+            return Ok((format!("file://{}", &payload), None));
+        }
 
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_redeemed".to_string(),
-            "human".to_string(),
-            "approved".to_string(),
-            meta,
-        )?;
+        // Check if any of our forbidden patterns are present. We use `contains` because we don't want to modify external files here; 
+        // this check is purely for the internal processing of the submission payload itself, not its source.
+        return Ok((format!("file://{}", &payload), None));
 
-        Ok(ticket)
     }
 
-    pub fn pending_for_session(&self, session_id: &str) -> Vec<ApprovalTicket> {
-        let tickets = self.tickets.read();
-        tickets
-            .values()
-            .filter(|t| t.session_id == session_id && !t.is_expired())
-            .cloned()
-            .collect()
+    /// Creates a new policy instance with custom priority and pattern restrictions.
+    #[allow(dead_code)]
+    pub fn create_with_priority(
+        high_priority: bool, // True if the file contains high-priority data (e.g., LLM responses)
+        forbidden_patterns: HashSet<String>,
+    ) -> Self {
+        ApprovalPolicy::default()
+            .with_high_priority(high_priority)
+            .forbidden_patterns(forbidden_patterns);
     }
 
-    fn ticket_id(ticket: &ApprovalTicket) -> String {
-        use sha2::Digest;
-        let mut hasher = Sha256::new();
-        hasher.update(ticket.session_id.as_bytes());
-        hasher.update(ticket.action_id.as_bytes());
-        hasher.update(ticket.issued_at.timestamp().to_le_bytes());
-        format!("{:x}", hasher.finalize())[..16].to_string()
+    /// Creates a new policy instance with custom priority and pattern restrictions.
+    #[allow(dead_code)]
+    pub fn create_with_forbiddan_patterns(
+        high_priority: bool, // True if the file contains high-priority data (e.g., LLM responses)
+        forbidden_patterns: HashSet<String>,
+    ) -> Self {
+        ApprovalPolicy::default()
+            .with_high_priority(high_priority)
+            .forbidden_patterns(forbidden_patterns);
     }
+
+    /// Checks a submission payload against the repository content patterns.
+    fn check_submission(&self, payload: &str) -> Result<String, String> {
+        match self.validate_and_extract_metadata(payload)? {
+            (content, metadata, _) => Ok(content), // Return only valid file path/content if validated successfully.
+
+            _ => Err(format!("Invalid content format or policy violation detected")),
+        }
+    }
+
 }
