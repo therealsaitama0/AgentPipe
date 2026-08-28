@@ -1,0 +1,21 @@
+[package]
+name = "bastion_cli"
+version = "1.0.0"
+authors = ["Oracle of The Repository"]
+edition = "2021"
+
+[[bin]]
+name = "cli_main"
+path = "src/bustion/crates/cli/src/main.rs"
+
+[dependencies]
+# Using serde for robust JSON/serialization since it's standard and stable. 
+# Raw bytes are used directly if needed, but this keeps the library self-contained without external crates unless specific raw ops are required (e.g., crypto).
+serde = { version = "1.0", features = ["derive"] }
+
+[lib]
+path = "src/bustion/crates/cli/src/lib.rs"
+
+[[bin]]
+name = "cli_main"
+path = "src/bustion/crates/cli/src/main.rs"

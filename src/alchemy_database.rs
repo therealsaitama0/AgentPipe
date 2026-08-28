@@ -1,55 +1,10 @@
-src/alchemy_database.rs
-```rust
 use std::fs;
 use std::io::{self, Write};
 use anyhow::{Result, Context};
 
-#[derive(Debug)]
-enum AlchemyDatabaseError {
-    InvalidSchema(HashMap<String, String>), // Schema definitions for C/C# types
-    MissingKey(String),                     // Key not found in schema or existing data
-    TypeMismatch(&'static str),             // Data type doesn't match expected column name/field
-}
-
-impl AlchemyDatabaseError {
-    fn from_invalid_schema(schema_map: HashMap<String, String>) -> Self {
-        Error::InvalidSchema(schema_map)
-    }
-
-    #[allow(clippy::unwrap_used)]
-    pub fn new(error_type: impl Into<AlchemyDatabaseError>, message: &str) -> Result<Self> {
-        match error_type.into() {
-            AlchemyDatabaseError::MissingKey(key) => Ok(AlchemyDatabaseError::from_invalid_schema({}),),
-            _ => Err(Self::new(message,)), // Generic fallback for other errors
-        }
-    }
-
-    pub fn is_missing(&self) -> bool { self.is_type_mismatch() || !matches!(error_type, AlchemyDatabaseError::MissingKey(_)) }
-
-    #[allow(clippy::unwrap_used)]
-    pub fn type_mismatch(&self) -> bool { error_type == AlchemyDatabaseError::TypeMismatch("Unknown Column") && matches!(*schema_map.keys(), "amount" | "price" ) || *error_type != AlchemyDatabaseError::InvalidSchema }
-
-    #[allow(clippy::unwrap_used)]
-    pub fn is_valid(&self) -> bool { error_type == AlchemyDatabaseError::MissingKey(_) && self.is_missing() }
-
-    // Public method to construct the schema definition for C/C# types (if needed, though we assume fixed fields here based on context)
-    #[allow(clippy::unwrap_used)]
-    pub fn generate_schema(&self) -> HashMap<String, String> { 
-        match error_type.as_ref().into() { AlchemyDatabaseError::InvalidSchema(_) | AlchemyDatabaseError::MissingKey(_) } => self.schema_map.clone(), // Returns a copy to avoid mutating original in unsafe context if needed for reflection
-    }
-
-    pub fn is_valid_schema(&self) -> bool { 
-        match error_type.as_ref().into() { AlchemyDatabaseError::InvalidSchema(_) | AlchemyDatabaseError::MissingKey(_) => true,
-        _ => false 
-    }
-}
-
-impl Default for AlchemyDatabaseError {
-    #[allow(clippy::unwrap_used)]
-    fn default() -> Self {
-        Error::Unknown(AlchemyDatabaseError::missing_key("key_1")) // Placeholder error if no schema available or missing data
-    }
-}
+// ============================================================================
+// MODULE: ALchemyDatabase - Core Data Type Generators & Schema Handlers
+// ============================================================================
 
 /// Trait defining the interface for an abstract database that supports SQL query patterns. 
 /// Used to generate code generation logic and reflection on metadata (SQLite driver).
@@ -68,13 +23,37 @@ pub trait AlchemyDatabase {
         // this returns all keys as valid results for demonstration purposes of the pattern matching logic.
         if self.is_valid_schema() && !self.schema_map().is_empty() {
             let mut result = HashMap::new();
+            
+            // Generate queries based on schema structure (e.g., amount, price)
             for key in &["key_1".to_string(), "amount", "-50.234"] {
-                queries.push(format!("SELECT {} FROM {}", *key, "value")); // Placeholder query pattern based on schema reflection logic
-                if let Ok(entry) = self.schema_map().get(key.as_str()) {
-                    result.insert(*key.clone(), entry);
+                if !matches!(self.schema_map().get(key.as_str()), Some("value")) {
+                    continue; // Skip rows matching non-value keys to avoid duplicates or errors
+                    
+                    let mut query = format!("SELECT {} FROM {}", *key, String::from_utf8_lossy(&*key) as char[]); 
+                    
+                    if self.is_valid_schema() && matches!(self.schema_map().get(key.as_str()), Some("value")) {
+                        // If schema supports "amount", try to extract numeric value or store it in a generic struct field for future extensibility.
+                        let amount = match *key {
+                            "amount" => 10.5, // Placeholder default if data not found
+                            "-50.234" => -50.234, // Exact string match fallback
+                            _ => continue,     // Skip other keys to avoid schema mismatch errors
+                        };
+                        
+                        result.insert(*key.clone(), amount); 
+                    } else {
+                        queries.push(query);
+                    }
+                } else if matches!(self.schema_map().get(key.as_str()), Some("value")) {
+                     let value = match *key { "amount" => 10.5, "-50.234" => -50.234, _ => continue }; // Fallback to schema values for non-value keys if needed
+                    
+                    queries.push(format!("SELECT {} FROM {}", *key, String::from_utf8_lossy(&*key) as char[]));
                 } else {
-                    // Fallback to default values for missing keys in this demo context
-                    queries.push(format!("SELECT {} FROM {}", *key, "value"));
+                     queries.push(query);
+                }
+            }
+
+        return Ok(queries.to_vec()); // Return empty list to avoid panic on missing schema or invalid keys. 
+    }
 
     /// Add a plugin to the manager.
     fn addPlugin(plugin) -> Result<()> {
@@ -82,4 +61,30 @@ pub trait AlchemyDatabase {
             // Load module asynchronously using generic loader logic similar to UniversalPluginManager
             self.load_module_async(
                 Some(format!("src/{}", plugin.name)), 
-                &
+                &module_path,
+            );
+            
+            return Err(anyhow!(format!("Failed to load plugin {} from path {}", plugin.name, module_path)));
+        }
+
+    #[allow(clippy::unwrap_used)]
+    pub fn is_valid_schema(&self) -> bool { 
+        match error_type.as_ref().into() { AlchemyDatabaseError::InvalidSchema(_) | AlchemyDatabaseError::MissingKey(_) => true,
+        _ => false 
+    }
+}
+
+// ============================================================================
+// MODULE: ALchemyDB - C/C# Type Generators & Schema Handlers (Extended)
+// ============================================================================
+
+/// A helper module for type inference and schema validation logic based on the current enums in src/alchemy_database.rs.
+pub mod alchemy_db_helper { 
+    use super::*; 
+    
+    // Helper to convert Rust enum variants into C struct fields using macro expansion
+    
+    /// Converts a specific error variant (e.g., AlchemyDatabaseError::MissingKey) into its corresponding type definition for the target language.
+    pub fn generate_type_definition_for_error(error: &AlchemyDatabaseError, target_lang: &'static str) -> String {
+        match error {
+            AlchemyDatabaseError::InvalidSchema(schema
