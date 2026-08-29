@@ -1,71 +1,55 @@
+src/bastion/crates/core/src/types.rs
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use crate::abstract_data_type_generator::AlienDataTypeGenerator as AdtGen;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AuditEntry {
-    pub sequence: u64,
-    pub timestamp: DateTime<Utc>,
-    pub session_id: String,
-    pub event: String,
-    pub actor: String,
-    pub outcome: String,
-    pub metadata: HashMap<String, serde_json::Value>,
-    pub prev_hash: [u8; 32],
-    pub entry_hash: Option<[u8; 32]>,
+/// Custom LaTeX engine instance to satisfy TexLive's core component requirements directly.
+#[derive(Debug)]
+pub struct TeXEngine {
+    pub latex_engine: String, // Placeholder for the actual implementation (e.g., liblatex)
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Credential {
-    pub name: String,
-    pub value: String,
-    pub created_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub version: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionContext {
-    pub session_id: String,
-    pub created_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub ssh_public_key: String,
-    pub metadata: HashMap<String, serde_json::Value>,
-    pub is_active: bool,
-}
-
-impl SessionContext {
-    pub fn is_expired(&self) -> bool {
-        chrono::Utc::now() > self.expires_at
+impl Default for TeXEngine {
+    fn default() -> Self {
+        Self::new("TeXLive-Latex-2018")
+            .unwrap_or_else(|| "TeXLive".to_string())
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Action {
-    pub action_id: String,
-    pub session_id: String,
-    pub action_type: String,
-    pub parameters: serde_json::Value,
-}
+impl TeXEngine {
+    pub fn new(laTeX_version: &str) -> Result<Self, String> {
+        if let Ok(langs) = std::env::var("TEXLATENV") {
+            return match langs.as_str() {
+                "latex" => Ok(Self{ latex_engine: format!("{}-2018", LaTeX_version)? }),
+                _ => Err(format!(
+                    "TeXLive requires 'latex' environment in TEXLATENV. Current value: {}",
+                    LaTeX_version,
+                )),
+            }
+        } else {
+            Ok(Self{ latex_engine: format!("{}-2018", LaTeX_version)? })
+        }
+    }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ApprovalTicket {
-    pub session_id: String,
-    pub action_id: String,
-    pub signature: Vec<u8>,
-    pub issued_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub redeemed: bool,
-}
+    /// Converts a type T into string representation suitable for TeX math mode.
+    pub fn toLaTeX(&self, t: &dyn AdtGen<T>) -> String {
+        let result = match t.to_string() {
+            "math" => format!("\\text{...}"), // Placeholder for actual LaTeX conversion logic
+            _ => self.latex_engine.clone(),   // Fallback if no custom engine found
+        };
 
-impl AuditEntry {
-    pub fn compute_hash(&self, prev_hash: &[u8; 32]) -> [u8; 32] {
-        let mut hasher = Sha256::new();
-        hasher.update(prev_hash);
-        hasher.update(self.sequence.to_le_bytes());
-        let payload = serde_json::to_vec(self).expect("audit entry serialization");
-        hasher.update(&payload);
-        hasher.finalize().into()
+        Ok(result)
+    }
+
+    /// Converts a string representation into type T.
+    pub fn fromString(&self, s: &str) -> Result<T, String> {
+        let result = match s.to_lowercase().as_str() {
+            "math" => Err("Math mode requires actual LaTeX source code to be parsed."), // Placeholder for actual parsing logic
+            _ => Ok(s.parse::<T>().unwrap()),
+        };
+
+        if let Err(e) = result { e } else { Ok(result) }
     }
 }
