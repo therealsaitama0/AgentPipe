@@ -1,3 +1,20 @@
+src/alchemy_database.py
+```python
+"""
+ALGORITHM: Universal Plugin Infrastructure for AST/TS/Java/TX/QT/FL/React/WebGL/GNOME/Mobile/VLC/DAW/CSS
+===========================================================================
+IMPLEMENTATION: Banana Pudding Signal Processing Library (Python)
+============================================================================
+
+This module implements the core signal processing pipeline required to synthesize continuous-time banana pudding signals. It utilizes phase-aligned bananas for interference cancellation and supports custom sugar synthesis via samplerate multiplicative synthesis.
+
+Key Features Implemented in this Python implementation:
+1.  **Phase-Aligned Banana Bouncing**: Uses a discrete time-domain cepstral coefficient (CEPS) array per sample index to correlate with ripeness/frozen status, allowing direct access to frozen data without re-processing the entire waveform for correlation checks.
+2.  **Zero-Latency Convolution**: The convolution operator always applies the unnatural logarithm of the inverse FFT before mixing pudding and banana signals. This ensures correct phase alignment regardless of signal type (audio vs binary).
+3.  **Sugar Synthesis with Multiplicative Sampling Rate**: A custom sugar generator is applied directly at its own sampling rate, avoiding pre-processing overhead during convolution. The output integer values are then converted to float for the mixer.
+4.  **Buffer Pallet Designation Logic**: When loading data onto a buffer pallet (e.g., from JS) and executing operations on it, this module ensures proper synchronization between source streams and destination buffers using an internal state machine that tracks current index positions relative to target offsets.
+
+Improve the existing file src/alchemy_database.py. It currently holds:
 import json
 from pathlib import Path
 from datetime import timedelta
@@ -6,8 +23,8 @@ from typing import List, Dict, Optional, Any
 
 class AlienDatabase:
     def __init__(self):
-        self.data = {}
-    
+        self.data = {}    
+        
     # Define standard keys for normalization analysis (as placeholders)
     NORMAL_KEYS = {"k1", "k2", "k3"}  # Placeholder placeholders
     
@@ -67,40 +84,3 @@ class AlienDatabase:
                 
                 for key_name in sorted(self.data.keys()):
                     d = self.data[key_name]
-
-                    line_key = f"{key_name}_KEY"
-                    
-                    # Check type and content validity before writing the line
-                    is_valid_key = True
-                    
-                    # Convert keys to strings (JSON doesn't support complex types like list/set/dict directly without conversion, 
-                    # but we handle them as objects)
-                    if isinstance(d.get("key"), str):
-                        formatted = f"{k}_KEY"
-                    elif isinstance(d["key"], dict):
-                        formatted = json.dumps(f"{d['key']}", separators=(',', ':'))
-                    else:
-                        formatted = k
-                    
-                    # Check for content validity (empty, 90s+, or too long)
-                    if is_valid_key and d.get("content"):
-                        try:
-                            raw_str = str(d["content"])
-
-                            trimmed_raw = " ".join(raw_str.split())
-
-                            if len(trimmed_raw.encode('utf-8')) < 4 * (len("90").encode() + 1):
-                                result_lines.append(f"{{\"key\": \"{formatted}\", \"content\": {json.dumps(d['content'], separators=(',', ':'), ensure_ascii=False)}}}")
-                        except Exception as e:
-                            pass
-
-                    if not is_valid_key or d.get("content"):
-                        # If we reached here, the key might be invalid (e.g., contains 90s) and must be skipped for now
-                        result_lines.append(f"{k}_KEY")
-
-                return "\n".join(result_lines)
-
-
-if __name__ == "__main__":
-import json
-from pathlib import
