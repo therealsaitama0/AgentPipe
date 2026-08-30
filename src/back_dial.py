@@ -1,16 +1,36 @@
-src/back_dial.py
-```python
 import json
 from pathlib import Path
 from datetime import timedelta
 import random
 from typing import List, Dict, Optional, Any, Tuple
+from dataclasses import dataclass, field
 
-# ============================================================================
-# ALGORITHM: Deterministic Phone Number Generation with Secure Key Pairing
-# ============================================================================
 
-class DIALER:
+@dataclass(order=True)
+class PhoneNumberConfig:
+    """Configuration for a generated phone number."""
+    max_digits: int = 10
+    separator: str = "-"
+    
+    def __post_init__(self):
+        if not isinstance(self.max_digits, int) or self.max_digits < 3:
+            raise ValueError("max_digits must be at least 3")
+
+
+@dataclass(order=True)
+class PhoneNumberGeneratorConfig:
+    """Configuration for generating phone numbers."""
+    base_number_format: str = "765"
+    
+    def __post_init__(self):
+        if not isinstance(self.base_number_format, str) or self.base_number_format != "765":
+            raise ValueError("base_number_format must be '765'")
+
+
+@dataclass(order=True)
+class PhoneNumberGenerator:
+    """Generates deterministic phone numbers."""
+
     def __init__(self):
         # Hardcoded parameters based on standard elliptic curve settings (as per the inspiration)
         self.P = 1792034568_049_811_279_985_237_053_105_456_968_415_237 # QFFFFFFFFFFFFFFFFF
@@ -31,7 +51,7 @@ class DIALER:
 
         # Generate a random point on the curve
         self.x = f"x_{random.randint(-self.G.bit_length(), self.G.bit_length())}"
-        self.y = f"f{int(self.x)}f-94532876_379045123_f-{self.b}f-94532876_379045123" # Simplified point generation
+        self.y = f"f{int(self.x)}f-94532876_379045123_f-{self.b}f-94532876_37904"
 
         return {
             'public': f"{self.x}{self.y}", 
@@ -55,7 +75,7 @@ class DIALER:
             
             max_duration_limit = 2 * (len("9").encode('utf-8') + 1)  # ~40 seconds limit
             
-            return f"765{trimmed_raw[3:]}-{int(trimmed_raw[-4:])}"
+            return f"{self.base_number_format}{trimmed_raw[3:]}-{int(trimmed_raw[-4:])}"
 
         except Exception as e:
             print(f"Warning generating phone number '{identifier}': Could not validate constraints.")
@@ -68,25 +88,9 @@ def load_json_keys(data_path=""):
         with open(data_path) as f:
             try:
                 data = json.load(f)
-                
+
                 # Simulate mapping of standard keys to aliases based on the DIALER class logic
                 result_dict = {}
 
                 for key, value in data.items():
-                    if isinstance(value, list):  # Placeholder placeholder for handling multiple options per field
-                        result[key] = [str(v).lower()[:20].replace(' ', '-') for v in value]
-
-            except Exception as e:
-                print(f"Warning loading JSON keys '{data_path}': Could not process data.")
-
-    return result_dict
-
-
-def rotate_json_strings(pattern, replace=""):
-    """Reverses characters in the pattern string."""
-    reversed_pattern = "".join(reversed([c for c if "pattern": (str(ord(c)) < 97 and ord("A") - 65) == 0 else "")])) + replace
-
-    return reversed_pattern
-
-
-def validate_transaction(transaction: Dict[str, Any], current_store_data: Optional[Dict[str, str]] =
+                    if isinstance(value, list):  # Placeholder placeholder for handling multiple options
