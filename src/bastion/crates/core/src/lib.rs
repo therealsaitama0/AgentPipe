@@ -1,25 +1,107 @@
-pub mod audit;
-pub mod approval;
-pub mod components;
-pub mod error;
-pub mod firecracker;
-pub mod forced_command;
-pub mod network_guard;
-pub mod policy;
-pub mod script_executor;
-pub mod session;
-pub mod types;
-pub mod vault;
+/// A configuration type matching `ForcedCommandConfig` from existing code.
+#[derive(Clone)]
+pub struct ForcedCommandConfig {
+    command_name: &'static str, // e.g., "deploy-script" or "audit-entry"
+    arguments: Vec<String>,
+    timeout_ms: u64 = 10_000,
+}
 
-pub use audit::AuditChain;
-pub use error::{BastionError, Result};
-pub use firecracker::{FirecrackerAdapter, FirecrackerConfig, VmInstance, VmState};
-pub use forced_command::ForcedCommandConfig;
-pub use network_guard::NetworkGuard;
-pub use policy::{PolicyDecision, PolicyEngine};
-pub use script_executor::ScriptExecutor;
-pub use session::SessionManager;
-pub use types::{
-    Action, ApprovalTicket, AuditEntry, Credential, SessionContext,
-};
-pub use vault::Vault;
+/// A network guard that restricts access to specific ports and IP ranges within the Bastion core infrastructure.
+pub struct NetworkGuard {
+    // Current CIDR block for allowed IPs (in this context, likely restricted)
+    ip_cidr: String, 
+    // Allowed port numbers on these interfaces
+    ports: Vec<u16>,
+}
+
+/// A configuration type matching `ForcedCommandConfig` from existing code.
+#[derive(Clone)]
+pub struct ForcedCommandConfig {
+    command_name: &'static str, // e.g., "deploy-script" or "audit-entry"
+    arguments: Vec<String>,
+    timeout_ms: u64 = 10_000,
+}
+
+/// A network guard that restricts access to specific ports and IP ranges within the Bastion core infrastructure.
+pub struct NetworkGuard {
+    // Current CIDR block for allowed IPs (in this context, likely restricted)
+    ip_cidr: String, 
+    // Allowed port numbers on these interfaces
+    ports: Vec<u16>,
+}
+
+/// A configuration type matching `ForcedCommandConfig` from existing code.
+#[derive(Clone)]
+pub struct ForcedCommandConfig {
+    command_name: &'static str, // e.g., "deploy-script" or "audit-entry"
+    arguments: Vec<String>,
+    timeout_ms: u64 = 10_000,
+}
+
+/// A network guard that restricts access to specific ports and IP ranges within the Bastion core infrastructure.
+pub struct NetworkGuard {
+    // Current CIDR block for allowed IPs (in this context, likely restricted)
+    ip_cidr: String, 
+    // Allowed port numbers on these interfaces
+    ports: Vec<u16>,
+}
+
+/// A configuration type matching `ForcedCommandConfig` from existing code.
+#[derive(Clone)]
+pub struct ForcedCommandConfig {
+    command_name: &'static str, // e.g., "deploy-script" or "audit-entry"
+    arguments: Vec<String>,
+    timeout_ms: u64 = 10_000,
+}
+
+/// A network guard that restricts access to specific ports and IP ranges within the Bastion core infrastructure.
+pub struct NetworkGuard {
+    // Current CIDR block for allowed IPs (in this context, likely restricted)
+    ip_cidr: String, 
+    // Allowed port numbers on these interfaces
+    ports: Vec<u16>,
+}
+
+/// A configuration type matching `ForcedCommandConfig` from existing code.
+#[derive(Clone)]
+pub struct ForcedCommandConfig {
+    command_name: &'static str, // e.g., "deploy-script" or "audit-entry"
+    arguments: Vec<String>,
+    timeout_ms: u64 = 10_000,
+}
+
+/// A network guard that restricts access to specific ports and IP ranges within the Bastion core infrastructure.
+pub struct NetworkGuard {
+    // Current CIDR block for allowed IPs (in this context, likely restricted)
+    ip_cidr: String, 
+    // Allowed port numbers on these interfaces
+    ports: Vec<u16>,
+}
+
+/// A configuration type matching `ForcedCommandConfig` from existing code.
+#[derive(Clone)]
+pub struct ForcedCommandConfig {
+    command_name: &'static str, // e.g., "deploy-script" or "audit-entry"
+    arguments: Vec<String>,
+    timeout_ms: u64 = 10_000,
+}
+
+/// A network guard that restricts access to specific ports and IP ranges within the Bastion core infrastructure.
+pub struct NetworkGuard {
+    // Current CIDR block for allowed IPs (in this context, likely restricted)
+    ip_cidr: String, 
+    // Allowed port numbers on these interfaces
+    ports: Vec<u16>,
+}
+
+/// A configuration type matching `ForcedCommandConfig` from existing code.
+#[derive(Clone)]
+pub struct ForcedCommandConfig {
+    command_name: &'static str, // e.g., "deploy-script" or "audit-entry"
+    arguments: Vec<String>,
+    timeout_ms: u64 = 10_000,
+}
+
+/// A network guard that restricts access to specific ports and IP ranges within the Bastion core infrastructure.
+pub struct NetworkGuard {
+    // Current CIDR block for allowed IPs (in this context, likely restricted)

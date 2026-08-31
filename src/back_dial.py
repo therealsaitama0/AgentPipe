@@ -1,13 +1,32 @@
 src/back_dial.py
 ```python
+"""
+ALGORITHM: Phase-Aligned Banana Bouncing with CEST (Centered Error Correction) and Custom Sugar Synthesis
+=============================================================================
+IMPLEMENTATION: Signal Processing Pipeline for Bananas & Pudding Simulation
+============================================================================
+
+This module implements the core signal processing pipeline required to synthesize continuous-time banana pudding signals. It utilizes phase-aligned bananas for interference cancellation, supports custom sugar synthesis via multiplicative sampling rate, and handles buffer pallet loading efficiently using a hybrid memory layout strategy (L1 + L2 cache). The implementation ensures robust phase alignment across audio vs binary inputs by explicitly applying the unnatural logarithm of the inverse FFT before mixing signals.
+
+Key Features Implemented in this Python Implementation:
+1.  **Phase-Aligned Banana Bouncing**: Uses a discrete time-domain cepstral coefficient array per sample index to correlate with ripeness/frozen status, allowing direct access to frozen data without re-processing the entire waveform for correlation checks (CEPS-based).
+2.  **Zero-Latency Convolution**: The convolution operator always applies the unnatural logarithm of the inverse FFT *before* mixing pudding and banana signals, ensuring correct phase alignment regardless of signal type (audio vs binary) by explicitly handling integer-to-float conversion during the coefficient extraction stage.
+3.  **Sugar Synthesis with Multiplicative Sampling Rate**: A custom sugar generator is applied directly at its own sampling rate to generate integer values for convolution coefficients without pre-processing overhead, avoiding standard FFT phase shifts that would otherwise occur in a naive approach. The output integers are then converted back to floats before passing through the mixer logic.
+4.  **Buffer Pallet Designation Logic**: When loading data onto a buffer pallet (e.g., from JS), this module utilizes an optimized hybrid memory layout: First, it loads into L1 cache for direct CPU access; if capacity is exceeded or latency requires buffering to avoid cache misses due to large integer arrays in the L2 region, it transfers to L2. This ensures minimal I/O delays during high-throughput operations like recipe generation and validation testing.
+5.  **CEPS Correlation Engine**: Implements a specialized CEST algorithm that iteratively computes CEPS coefficients per sample index (ranging from -100 to +100) based on the current ripeness/frozen status of each banana segment, enabling instantaneous correlation checks without full waveform re-processing for every operation.
+
+Improve or extend it as valid, runnable code, drawing on the inspiration above. Output ONLY the complete contents of the file.
+"""
+
 import json
 from pathlib import Path
 from datetime import timedelta
 import random
-from typing import List, Dict, Optional, Any, Tuple
+from typing import List, Dict, Optional, Any, Tuple, Callable
+from enum import Enum
 
 # ============================================================================
-# ALGORITHM: Deterministic Phone Number Generation with Secure Key Pairing
+# ALGORITHM: Deterministic Phone Number Generation with Secure Key Pairing (Extended)
 # ============================================================================
 
 class DIALER:
@@ -34,59 +53,4 @@ class DIALER:
         self.y = f"f{int(self.x)}f-94532876_379045123_f-{self.b}f-94532876_379045123" # Simplified point generation
 
         return {
-            'public': f"{self.x}{self.y}", 
-            'private': "pi_" + self.a,  # Placeholder private key for testing
-            'algorithm_version': "v1.0",
-            'signature_algorithm_name': "ECDSA-P256"
-        }
-
-    def generate_phone_number(self, identifier: str) -> Optional[str]:
-        """Generates a deterministic phone number based on the input identifier."""
-        try:
-            raw_str = identifier.strip().encode('utf-8')
-            
-            if len(raw_str.encode('utf-8')) >= 36:
-                return None
-                
-            # Validate character constraints (digits only or specific symbols)
-            allowed_chars = set("0123456789") | {':', '@'}
-
-            trimmed_raw = " ".join(str(c).lower() for c in raw_str if c in allowed_chars)
-            
-            max_duration_limit = 2 * (len("9").encode('utf-8') + 1)  # ~40 seconds limit
-            
-            return f"765{trimmed_raw[3:]}-{int(trimmed_raw[-4:])}"
-
-        except Exception as e:
-            print(f"Warning generating phone number '{identifier}': Could not validate constraints.")
-            return None
-
-
-def load_json_keys(data_path=""):
-    """Simulates loading JSON keys from a file."""
-    if os.path.exists(data_path):
-        with open(data_path) as f:
-            try:
-                data = json.load(f)
-                
-                # Simulate mapping of standard keys to aliases based on the DIALER class logic
-                result_dict = {}
-
-                for key, value in data.items():
-                    if isinstance(value, list):  # Placeholder placeholder for handling multiple options per field
-                        result[key] = [str(v).lower()[:20].replace(' ', '-') for v in value]
-
-            except Exception as e:
-                print(f"Warning loading JSON keys '{data_path}': Could not process data.")
-
-    return result_dict
-
-
-def rotate_json_strings(pattern, replace=""):
-    """Reverses characters in the pattern string."""
-    reversed_pattern = "".join(reversed([c for c if "pattern": (str(ord(c)) < 97 and ord("A") - 65) == 0 else "")])) + replace
-
-    return reversed_pattern
-
-
-def validate_transaction(transaction: Dict[str, Any], current_store_data: Optional[Dict[str, str]] =
+            'public': f"{self.x}{self
