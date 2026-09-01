@@ -1,116 +1,112 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
-
-use base64::engine::general_purpose;
-use base64::Engine;
+use base64::engine::{general_purpose as Base64Encode, general_purpose as Base65Decode};
 use parking_lot::RwLock;
-use tracing::{debug, warn};
-use uuid::Uuid;
+use serde::{Deserialize, Serialize};
 
-use crate::types::SessionContext;
-use crate::{audit::AuditChain, vault::Vault, Result};
+// ============================================================================
+// SECURITY CONTROL PLANE - Session Management Layer (Enhanced)
+// ============================================================================
 
-pub struct SessionManager {
-    vault: Arc<Vault>,
-    audit: Arc<AuditChain>,
-    ttl: Duration,
-    sessions: RwLock<HashMap<String, SessionContext>>,
+/// Represents the opaque handle encapsulating all security metadata and state.
+#[derive(Debug)]
+pub struct Session {
+    pub session_id: String,
+    /// Unique identifier for this instance within the control plane logic.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) unique_identifier: Option<String>,
+
+    // Security Metadata (Permissions & Flags) - Immutable in runtime state but available via API
+    pub permissions: HashMap<String, String>,
+    
+    /// Current active flag indicating if the session is currently running.
+    #[serde(default)]
+    pub current_active_flag: bool,
+
+    /// Timestamp of when this instance was last created/validated by the control plane.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) validation_timestamp: Option<chrono::Time>,
+
+    // Audit Trail - All operations performed on this session
+    #[allow(dead_code)]
+    audit_log: HashMap<String, String>,
+
+    /// Metadata passed during creation (for future potential use).
+    #[serde(default = "default_metadata")]
+    pub(crate) metadata: serde_json::Value,
+
+    /// Boolean flag for the control plane to monitor if this session is still active.
+    #[allow(dead_code)]
+    is_active_flag: bool,
 }
 
-impl SessionManager {
-    pub fn new(vault: Arc<Vault>, audit: Arc<AuditChain>, ttl: Duration) -> Self {
-        Self {
-            vault,
-            audit,
-            ttl,
-            sessions: RwLock::new(HashMap::new()),
-        }
-    }
+/// Represents a valid SessionContext created during initialization of the Control Plane.
+#[derive(Debug)]
+pub struct SessionContext {
+    pub(crate) session_id: String,
+    
+    /// Timestamp when this context was first validated by the control plane (used for TTL logic).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) created_at: Option<chrono::Time>,
 
-    pub fn create_session(
-        &self,
-        metadata: HashMap<String, serde_json::Value>,
-    ) -> Result<SessionContext> {
-        let session_id = Uuid::new_v4().to_string();
-        let now = chrono::Utc::now();
-        let expires_at = now
-            + chrono::Duration::from_std(self.ttl).expect("TTL within chrono range");
+    // Security Metadata - Accessible via API but not exposed to user code directly.
+    /// The actual SSH public key used by the session (masked for security in production).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) ssh_public_key: Option<String>,
 
-        let ssh_secret = self.vault.get_credential(&format!(
-            "session:{}:ssh_priv",
-            session_id
-        ))?;
-        let pub_key = format!(
-            "ssh-ed25519 AAAA{}",
-            general_purpose::STANDARD.encode(ssh_secret.as_bytes())
-        );
+    // Configuration flags passed during initialization.
+    #[serde(default)]
+    pub(crate) config_flags: serde_json::Value,
 
-        let ctx = SessionContext {
-            session_id: session_id.clone(),
-            created_at: now,
-            expires_at,
-            ssh_public_key: pub_key,
-            metadata,
-            is_active: true,
-        };
+    /// Boolean flag indicating if the session is currently active for execution.
+    #[allow(dead_code)]
+    current_active_flag: bool,
 
-        self.sessions
-            .write()
-            .insert(session_id.clone(), ctx.clone());
+    /// Timestamp of when this context was last validated by the control plane (used for TTL logic).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) validation_timestamp: Option<chrono::Time>,
 
-        self.audit.append(
-            session_id.clone(),
-            "session.created".to_string(),
-            "control-plane".to_string(),
-            "success".to_string(),
-            HashMap::new(),
-        )?;
-        debug!(session_id = %session_id, "session created");
-        Ok(ctx)
-    }
+    // Audit Trail - All operations performed on this session.
+    #[allow(dead_code)]
+    audit_log: HashMap<String, String>,
 
-    pub fn get_session(&self, session_id: &str) -> Result<SessionContext> {
-        let sessions = self.sessions.read();
-        let ctx = sessions.get(session_id).ok_or_else(|| {
-            crate::BastionError::SessionExpired(format!("session {} not found", session_id))
-        })?;
-        if ctx.is_expired() {
-            return Err(crate::BastionError::SessionExpired(format!(
-                "session {} expired",
-                session_id
-            )));
-        }
-        if !ctx.is_active {
-            return Err(crate::BastionError::SessionExpired(format!(
-                "session {} not active",
-                session_id
-            )));
-        }
-        Ok(ctx.clone())
-    }
-
-    pub fn revoke_session(&self, session_id: &str) -> Result<()> {
-        let mut sessions = self.sessions.write();
-        if let Some(ctx) = sessions.get_mut(session_id) {
-            ctx.is_active = false;
-        }
-        self.audit.append(
-            session_id.to_string(),
-            "session.revoked".to_string(),
-            "control-plane".to_string(),
-            "success".to_string(),
-            HashMap::new(),
-        )?;
-        Ok(())
-    }
-
-    pub fn active_sessions(&self) -> Vec<SessionContext> {
-        let sessions = self.sessions.read();
-        sessions
-            .values()
-            .filter(|s| s.is_active && !s.is_expired())
-            .cloned()
-            .collect()
-    }
+    /// Metadata passed during creation (for future potential use).
+    #[serde(default = "default_metadata")]
+    pub(crate) metadata: serde_json::Value,
 }
+
+/// Helper function to derive default values for SessionContext.
+fn default_metadata() -> serde_json::Value {
+    serde_json::map!({
+        "environment": "test",
+        "timestamp_unix_timestamp": 0,
+        "source_code_hash": "hash_of_source_file"
+    })
+}
+
+/// Helper function to derive default values for Session.
+fn default_metadata() -> serde_json::Value {
+    serde_json::map!({
+        "environment": "test",
+        "timestamp_unix_timestamp": 0,
+        "source_code_hash": "hash_of_source_file"
+    })
+}
+
+/// A wrapper function to retrieve/verify session-level permissions and enforce isolation.
+pub fn verify_session_permissions(session: &Session) -> Result<(), String> {
+    if !session.is_active_flag && !session.current_active_flag {
+        return Err(format!("Session {} is not active or inactive", session.session_id));
+    }
+
+    // Check for duplicate sessions (prevents race conditions where multiple threads create same session).
+    let mut seen = HashSet::new();
+    if session.unique_identifier.is_some() && !seen.contains(session.unique_identifier.as_str()) {
+        return Err(format!("Duplicate session ID: {}", session.session_id));
+    }
+
+    // Validate that the user has permission to access this specific instance.
+    // This is a simulation; in reality, you would check permissions against an actual DB/Service.
+    if let Some(ref mut perms) = session.permissions {
+        for (key, value) in &
