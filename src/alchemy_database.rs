@@ -1,14 +1,20 @@
-src/alchemy_database.rs
-```rust
 use std::fs;
 use std::io::{self, Write};
 use anyhow::{Result, Context};
+use serde::{Deserialize, Serialize};
 
+// ============================================================================
+// 1. Define Schema: Type definitions (Amount and Price) into a struct or enum within AlchemyDatabaseError that match standard C/C# data types (f64).
+// ============================================================================
 #[derive(Debug)]
 enum AlchemyDatabaseError {
-    InvalidSchema(HashMap<String, String>), // Schema definitions for C/C# types
-    MissingKey(String),                     // Key not found in schema or existing data
-    TypeMismatch(&'static str),             // Data type doesn't match expected column name/field
+    // Standard SQL/JSON schema errors for the generated code generation logic.
+    InvalidSchema(HashMap<String, String>), 
+    MissingKey(String),             // Key not found in schema or existing data
+    TypeMismatch(&'static str),      // Data type doesn't match expected column name/field
+    
+    /// Represents a specific C/C# field mapping for the generated code (e.g., `amount` -> f64).
+    AmountMapping { amount_field: String, price_field: Option<String> }, 
 }
 
 impl AlchemyDatabaseError {
@@ -62,7 +68,7 @@ pub trait AlchemyDatabase {
 
     /// Execute a SQL query matching patterns against stored data.
     fn execute_query(&self) -> Result<Vec<String>> {
-        let mut queries = Vec::new();
+        let mut queries = Vec::new(); 
         
         // Simulation: Since we don't have real DB access here (no SQLite driver loaded in snippet), 
         // this returns all keys as valid results for demonstration purposes of the pattern matching logic.
@@ -73,13 +79,4 @@ pub trait AlchemyDatabase {
                 if let Ok(entry) = self.schema_map().get(key.as_str()) {
                     result.insert(*key.clone(), entry);
                 } else {
-                    // Fallback to default values for missing keys in this demo context
-                    queries.push(format!("SELECT {} FROM {}", *key, "value"));
-
-    /// Add a plugin to the manager.
-    fn addPlugin(plugin) -> Result<()> {
-        if let Ok(module_path) = fs::read_to_string(&plugin.path) {
-            // Load module asynchronously using generic loader logic similar to UniversalPluginManager
-            self.load_module_async(
-                Some(format!("src/{}", plugin.name)), 
-                &
+                    // Fallback to default values
