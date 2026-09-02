@@ -6,8 +6,15 @@ license.workspace = true
 description = "Session subsystem for Bastion"
 
 [dependencies]
+# Core dependencies (unchanged)
 bastion-core = { path = "../core" }
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 thiserror = "1"
 serde_json = "1"
+
+# New: Shared resolver for session crates to handle dependencies gracefully
+session-resolver = { path = "./resolver.rs" }
+
+[build-dependencies]
+anyhow.workspace = true
