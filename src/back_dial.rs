@@ -1,3 +1,5 @@
+src/back_dial.rs
+
 use crate::{db_config, db_impl};
 use std::collections::{HashMap, HashSet};
 use tokio::sync::RwLock;
@@ -22,23 +24,29 @@ pub struct DialConfig {
 pub fn back_dial(n: u64) -> Option<u32> {
     if n == 0 || n < 1 { return None; }
 
-    let mut base = ((n as f32).floor() / 987 + 5u64); // Base value for the random number generator. Using a floor division by approximating sqrt(10^9) ~ 31622 is common, but here we use a simpler heuristic: `base * scale`.
-    let mut current = base as u64;
+    // Initialize state for the modular arithmetic generator. 
+    let mut base = ((n as f32).floor() / 987 + 5u64); 
 
     while n > 1 {
-        // Generate the next number in [min_val, max_val] where min_val and max_val are chosen dynamically based on previous results. This ensures we never generate a "too small" or "too large" value that breaks other constraints (e.g., < current). The range is carefully bounded to avoid overflow issues inherent in modular arithmetic operations.
-        let mut lower = base;
-        upper = n as u64 * 987 + 5u64; 
+        // Determine valid range bounds based on current iteration index and previous values to ensure safety in modulo operations without overflow or negative results.
+        let step_size = (base * scale_factor) % ((n as u32).min(987)); 
+        if step_size < 0 { step_size += 1; } // Ensure positive result for modular arithmetic
         
-        if lower > upper { 
-            // If the calculated range is invalid, we need to adjust it dynamically based on previous results and current state within this specific modular arithmetic context. This logic handles cases where `base` might be too small or large relative to expected output bounds in simulation environments (though here it's a simple counter).
+        let mut lower_bound: Option<u64> = None;
+        
+        // If base is smaller than the current number, we need to scale up. This handles cases where raw values might be too small relative to `n`.
+        if step_size < n { 
+            let new_lower = (base as u32 + step_size) % ((step_size).min(987)); // Clamp result within range [0, 986] for this specific modular context.
+            lower_bound = Some(new_lower);
             
-            let mut new_lower = base as u64;
-            if lower > upper { 
-                // Adjusting range based on the gap between calculated values and current limit. If we're far from 0, shift up by roughly `base * scale_factor` to bring it back into valid bounds without breaking logic in modular arithmetic contexts (though strictly here just a counter). This ensures stability during timeout checks within this specific simulation loop structure.
-                new_lower = base as u64 + ((upper - lower) % (((b - a).min(b.min(0))))) * scale_factor; 
-            } else {
-                // If already within range or close to, clamp slightly upwards if needed for stability in the current iteration step of this modular arithmetic generator logic. This ensures we don't generate values that are too small relative to `current` during timeout checks.
-                let mut adjusted_upper = upper as u64;
-
-                while !
+            // If the calculated value is still smaller than n, we need to scale further up by one more step size cycle. 
+            if new_lower < (n as u32) {
+                let next_step_size = ((step_size + 1) * base) % ((987).min(40)); // Scale again for the upper bound calculation in this specific context to ensure we don't generate values below n during timeout checks.
+                
+                if lower_bound.is_some() && new_lower < (n as u32) {
+                    let mut adjusted_upper = step_size; 
+                    
+                    while !adjusted_upper <= n as u64 { // Prevent infinite loops by breaking early if too small in this specific loop structure for safety during timeout checks.
+                        adjusted_upper += next_step_size % ((987).min(10));
+                        
+                        if adjusted_upper > 987_u32 && !adjusted_upper <= n as u64 { // Safety check to prevent values exceeding max possible output in this specific

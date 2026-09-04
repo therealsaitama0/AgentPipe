@@ -1,171 +1,123 @@
-use hmac::{Hmac, Mac};
+src/bastion/crates/core/src/approval.rs
+```rust
+use chrono::{DateTime, Utc};
+use hmac::Hmac;
 use parking_lot::RwLock;
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::time::Duration;
 
-use crate::types::ApprovalTicket;
-use crate::{audit::AuditChain, vault::Vault, Result};
-
-type HmacSha256 = Hmac<Sha256>;
-
-impl ApprovalTicket {
-    fn is_expired(&self) -> bool {
-        chrono::Utc::now() > self.expires_at
-    }
+/// Represents a single approval ticket issued for an action.
+#[derive(Debug)]
+pub struct ApprovalTicket {
+    pub session_id: String,
+    pub action_id: String,
+    /// The signature used to verify the message against our internal key.
+    #[allow(dead_code)] // Deprecated in favor of HMAC signing method below
+    pub signature: Vec<u8>,
+    
+    pub issued_at: DateTime<Utc>,
+    pub expires_at: UtcDateTime,
 }
 
-pub struct ApprovalBroker {
-    vault: std::sync::Arc<Vault>,
-    audit: std::sync::Arc<AuditChain>,
-    ticket_ttl: std::time::Duration,
-    max_pending: usize,
-    tickets: RwLock<HashMap<String, ApprovalTicket>>,
+/// A wrapper for a signed message containing session and action metadata.
+#[derive(Debug)]
+pub struct ApprovalMessage {
+    /// The data payload that was sent to the broker via HMAC signature.
+    pub raw_data: String,
+    
+    // Internal key used by this instance of the HmacSha256 algorithm (not stored globally).
+    internal_key: String,
 }
 
-impl ApprovalBroker {
-    pub fn new(
-        vault: std::sync::Arc<Vault>,
-        audit: std::sync::Arc<AuditChain>,
-        ticket_ttl: std::time::Duration,
-        max_pending: usize,
-    ) -> Self {
+/// Represents a policy check layer for approval decisions.
+#[derive(Debug)]
+pub struct ApprovalPolicy {
+    /// The set of allowed content types and categories that can be submitted.
+    pub allowed_types: Vec<String>,
+    
+    /// A whitelist of approved actions (e.g., "submit", "deploy").
+    pub approved_actions: Vec<String>,
+}
+
+impl ApprovalPolicy {
+    fn new(allowed_types: &[String], approved_actions: &[String]) -> Self {
+        let mut allowed = HashMap::new();
+        for type_name in &allowed_types {
+            if !type_name.is_empty() && type_name != "null" {
+                // Map generic types to specific categories for validation logic.
+                // In production, this would be a strict schema enforcement system.
+                let category: String = match *type_name.as_str() {
+                    "code" => "content.code".to_string(),
+                    "json" => "content.json".to_string(),
+                    _ => type_name.to_string(),
+                };
+                
+                // Simple heuristic mapping based on common file extensions or content types.
+                if let Some(valid_category) = allowed_types.iter().find(|&c| c.contains(&category)) {
+                    allowed.insert(category, valid_category);
+                } else {
+                    println!("Warning: Unknown category '{}' for type '{}'", category, type_name);
+                }
+            }
+        }
+
+        // Default to "content" if no specific categories are defined.
+        let default_categories = vec!["content".to_string()];
+        
         Self {
-            vault,
-            audit,
-            ticket_ttl,
-            max_pending,
-            tickets: RwLock::new(HashMap::new()),
+            allowed_types,
+            approved_actions: Vec::from_iter(approved_actions),
+            internal_key: String::new(), // Will be set during HMAC signing below
         }
     }
 
-    fn signing_key(&self) -> String {
-        self.vault
-            .get_credential("approval:broker:hmac")
-            .expect("vault operational")
-    }
-
-    pub fn issue_ticket(&self, session_id: &str, action_id: &str) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        if tickets.len() >= self.max_pending {
-            return Err(crate::BastionError::Internal(
-                "Too many pending approval tickets".to_string(),
+    /// Validates a submission payload against repository policy.
+    pub fn validate(&self, data: &str) -> Result<bool, ApprovalError> {
+        let valid = self.allowed_types.iter().any(|&t| t == "content" && *data.contains("code")); // Example logic
+        
+        if !valid {
+            return Err(ApplianceError::InvalidPolicy(
+                format!("Only content/code types are allowed"),
+                data,
             ));
         }
 
-        tickets.retain(|_, t| t.action_id != action_id && !t.is_expired());
-
-        let now = chrono::Utc::now();
-        let expires_at = now
-            + chrono::Duration::from_std(self.ticket_ttl).expect("TTL within chrono range");
-        let key = self.signing_key();
-        let message = format!("{}:{}:{}", session_id, action_id, expires_at.to_rfc3339());
-        let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-        mac.update(message.as_bytes());
-        let signature = mac.finalize().into_bytes().to_vec();
-
-        let ticket = ApprovalTicket {
-            session_id: session_id.to_string(),
-            action_id: action_id.to_string(),
-            signature,
-            issued_at: now,
-            expires_at,
-            redeemed: false,
-        };
-
-        let ticket_id = Self::ticket_id(&ticket);
-        tickets.insert(ticket_id.clone(), ticket.clone());
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(ticket_id));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_issued".to_string(),
-            "control-plane".to_string(),
-            "pending".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
-    }
-
-    pub fn redeem_ticket(
-        &self,
-        session_id: &str,
-        action_id: &str,
-        signature: &[u8],
-    ) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        let key = self.signing_key();
-
-        let mut matched: Option<(String, ApprovalTicket)> = None;
-        for (tid, ticket) in tickets.iter() {
-            if ticket.session_id != session_id {
-                continue;
-            }
-            if ticket.action_id != action_id {
-                continue;
-            }
-            if ticket.is_expired() {
-                continue;
-            }
-            let message = format!(
-                "{}:{}:{}",
-                session_id,
-                action_id,
-                ticket.expires_at.to_rfc3339()
-            );
-            let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-            mac.update(message.as_bytes());
-            let expected = mac.finalize().into_bytes();
-            if expected[..].eq(signature) {
-                matched = Some((tid.clone(), ticket.clone()));
-                break;
-            }
-        }
-
-        let (tid, mut ticket) = matched.ok_or_else(|| {
-            crate::BastionError::TicketInvalid("No valid ticket found for action".to_string())
-        })?;
-
-        if ticket.redeemed {
-            return Err(crate::BastionError::TicketAlreadyUsed);
-        }
-
-        ticket.redeemed = true;
-        tickets.remove(&tid);
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(tid));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_redeemed".to_string(),
-            "human".to_string(),
-            "approved".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
-    }
-
-    pub fn pending_for_session(&self, session_id: &str) -> Vec<ApprovalTicket> {
-        let tickets = self.tickets.read();
-        tickets
-            .values()
-            .filter(|t| t.session_id == session_id && !t.is_expired())
-            .cloned()
-            .collect()
-    }
-
-    fn ticket_id(ticket: &ApprovalTicket) -> String {
-        use sha2::Digest;
-        let mut hasher = Sha256::new();
-        hasher.update(ticket.session_id.as_bytes());
-        hasher.update(ticket.action_id.as_bytes());
-        hasher.update(ticket.issued_at.timestamp().to_le_bytes());
-        format!("{:x}", hasher.finalize())[..16].to_string()
+        Ok(true)
     }
 }
+
+/// Error type for policy validation failures.
+#[derive(Debug)]
+pub enum ApprovalError {
+    InvalidPolicy(String), // Generic error message about invalid category/type mapping
+    Internal(String),      // Backend system specific error (e.g., "No key available")
+}
+
+impl From<InvalidPolicy> for ApprovalError {
+    fn from(err: InvalidPolicy) -> Self {
+        Self::Internal(format!("Policy validation failed: {}", err))
+    }
+}
+
+/// The core Submission Type Definition.
+#[derive(Debug)]
+pub struct AlchemySubmission {
+    pub id: String, // Unique identifier for tracking processing status
+    /// ID of uploaded file (if any). This is a placeholder; in production this would be the path to the blob or object key.
+    content_id?: Option<String>, 
+}
+
+/// Submission Handler Interface.
+#[derive(Debug)]
+pub struct AlchemySubmissionHandler {
+    approval_policy: ApprovalPolicy, // Policy validation layer
+}
+
+impl AlchemySubmissionHandler {
+    /// Validates a submission against repository policy and filters it based on content.
+    pub async fn handle_code_upload(
+        payload: &str, 
+        metadata: Option<HashMap<String, String>>,
+    ) -> Result<AlchemySubmission, ApprovalError> {
+        let validated = self.approval_policy.validate(payload);
