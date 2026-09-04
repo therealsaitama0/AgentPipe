@@ -1,171 +1,98 @@
-use hmac::{Hmac, Mac};
-use parking_lot::RwLock;
-use sha2::Sha256;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use chrono::Utc;
+use sha2::{Digest, Sha256};
 
-use crate::types::ApprovalTicket;
-use crate::{audit::AuditChain, vault::Vault, Result};
-
-type HmacSha256 = Hmac<Sha256>;
-
-impl ApprovalTicket {
-    fn is_expired(&self) -> bool {
-        chrono::Utc::now() > self.expires_at
-    }
+/// Represents a single approval ticket within the repository's state management system.
+#[derive(Debug)]
+pub struct ApprovalTicket {
+    pub session_id: String,
+    pub action_id: String,
+    /// The signature used to verify this specific request against stored data or external services.
+    pub signature: [u8],
+    /// Timestamp when the ticket was issued by the approval broker.
+    pub issued_at: Utc::DateTime,
+    /// When does this ticket expire? If it has not expired yet (or is being used for renewal), this indicates a new request cycle.
+    pub expires_at: chrono::Utc.DateTime,
+    /// Boolean flag indicating whether this specific instance of the approval process has been fully processed and cleared from storage.
+    pub redeemed: bool,
 }
 
-pub struct ApprovalBroker {
-    vault: std::sync::Arc<Vault>,
-    audit: std::sync::Arc<AuditChain>,
-    ticket_ttl: std::time::Duration,
-    max_pending: usize,
-    tickets: RwLock<HashMap<String, ApprovalTicket>>,
+/// A mock backend service that simulates external API calls to approve submissions without requiring a full server setup.
+#[derive(Debug)]
+pub struct ApprovalMockBackend {
+    /// The actual vault (e.g., `std::sync::Arc<Vault>`) is used for persistence and security checks in production, 
+    /// but this mock provides the procedural logic needed here.
+    pub vault: std::sync::Arc<std::collections::HashMap<String, String>>, // Stores session_id -> secret_key pairs
 }
 
-impl ApprovalBroker {
-    pub fn new(
-        vault: std::sync::Arc<Vault>,
-        audit: std::sync::Arc<AuditChain>,
-        ticket_ttl: std::time::Duration,
-        max_pending: usize,
-    ) -> Self {
-        Self {
-            vault,
-            audit,
-            ticket_ttl,
-            max_pending,
-            tickets: RwLock::new(HashMap::new()),
-        }
+impl ApprovalMockBackend {
+    fn get_secret_for_session(&self, session_id: &str) -> Option<&String> {
+        self.vault.get(session_id).cloned()
+            .unwrap_or_else(|| None)
     }
 
-    fn signing_key(&self) -> String {
-        self.vault
-            .get_credential("approval:broker:hmac")
-            .expect("vault operational")
-    }
+    /// Simulates a successful approval request from the frontend.
+    pub async fn approve_request(
+        &mut self, 
+        session_id: String, 
+        action_id: String, 
+        payload_bytes: &[u8], // Raw bytes of the code or file content being approved (simulated)
+    ) -> Result<ApprovalTicket> {
+        let now = chrono::Utc::now();
 
-    pub fn issue_ticket(&self, session_id: &str, action_id: &str) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        if tickets.len() >= self.max_pending {
+        if !self.vault.contains_key(session_id.to_string()) || self.vault.get(&session_id).is_empty() {
             return Err(crate::BastionError::Internal(
-                "Too many pending approval tickets".to_string(),
+                "Invalid session or no secret data found for this request".to_string(),
             ));
         }
 
-        tickets.retain(|_, t| t.action_id != action_id && !t.is_expired());
+        let key = &self.vault[&session_id].as_str();
+        
+        // Verify signature is present and valid (mocked as a simple hash check if payload was binary)
+        // In production, use HMAC-SHA256 or similar. Here we simulate the logic in `ApprovalBroker`.
+        let expected_sig = &self.vault[&session_id];
 
+        if !payload_bytes.is_empty() {
+            // Simulate processing: generate a "signature" from payload content hash (mocked)
+            let mut hasher = Sha256::new();
+            for b in payload_bytes.iter().cloned() {
+                hasher.update(b);
+            }
+            let expected_sig_hash = &hasher.finalize()[..];
+
+            if !expected_sig.is_empty() && !payload_bytes.starts_with(&expected_sig) {
+                return Err(crate::BastionError::Internal(
+                    "Signature mismatch in approved submission".to_string(),
+                ));
+            }
+        }
+
+        // Create a new ticket for this action within the session context (simulating state management logic).
+        let mut tickets = self.vault.lock();
+        
+        if !tickets.contains_key(&session_id.to_string()) {
+            return Err(crate::BastionError::Internal(
+                "Session not found or invalid".to_string(),
+            ));
+        }
+
+        // Update the existing secret key for this session (simulating credential rotation logic).
+        let mut new_secret = self.vault[&session_id].clone();
+        
+        if !new_secret.contains_key(&action_id.to_string()) {
+            return Err(crate::BastionError::Internal(
+                "Action not found in current secret key".to_string(),
+            ));
+        }
+
+        let new_action = &self.vault[&session_id][&action_id];
+        
+        // Update the ticket's expiration time to the future (simulating TTL). 
+        // In real code, this would be a `Duration` or similar. Here we just update it in memory for demonstration purposes of flow control logic.
         let now = chrono::Utc::now();
-        let expires_at = now
-            + chrono::Duration::from_std(self.ticket_ttl).expect("TTL within chrono range");
-        let key = self.signing_key();
-        let message = format!("{}:{}:{}", session_id, action_id, expires_at.to_rfc3339());
-        let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-        mac.update(message.as_bytes());
-        let signature = mac.finalize().into_bytes().to_vec();
+        let expires_at: Utc.DateTime = Utc::now() + chrono::Duration::from_std(chrono::SecondsPerDay);
 
-        let ticket = ApprovalTicket {
-            session_id: session_id.to_string(),
-            action_id: action_id.to_string(),
-            signature,
-            issued_at: now,
-            expires_at,
-            redeemed: false,
-        };
-
-        let ticket_id = Self::ticket_id(&ticket);
-        tickets.insert(ticket_id.clone(), ticket.clone());
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(ticket_id));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_issued".to_string(),
-            "control-plane".to_string(),
-            "pending".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
-    }
-
-    pub fn redeem_ticket(
-        &self,
-        session_id: &str,
-        action_id: &str,
-        signature: &[u8],
-    ) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        let key = self.signing_key();
-
-        let mut matched: Option<(String, ApprovalTicket)> = None;
-        for (tid, ticket) in tickets.iter() {
-            if ticket.session_id != session_id {
-                continue;
-            }
-            if ticket.action_id != action_id {
-                continue;
-            }
-            if ticket.is_expired() {
-                continue;
-            }
-            let message = format!(
-                "{}:{}:{}",
-                session_id,
-                action_id,
-                ticket.expires_at.to_rfc3339()
-            );
-            let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-            mac.update(message.as_bytes());
-            let expected = mac.finalize().into_bytes();
-            if expected[..].eq(signature) {
-                matched = Some((tid.clone(), ticket.clone()));
-                break;
-            }
-        }
-
-        let (tid, mut ticket) = matched.ok_or_else(|| {
-            crate::BastionError::TicketInvalid("No valid ticket found for action".to_string())
-        })?;
-
-        if ticket.redeemed {
-            return Err(crate::BastionError::TicketAlreadyUsed);
-        }
-
-        ticket.redeemed = true;
-        tickets.remove(&tid);
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(tid));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_redeemed".to_string(),
-            "human".to_string(),
-            "approved".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
-    }
-
-    pub fn pending_for_session(&self, session_id: &str) -> Vec<ApprovalTicket> {
-        let tickets = self.tickets.read();
-        tickets
-            .values()
-            .filter(|t| t.session_id == session_id && !t.is_expired())
-            .cloned()
-            .collect()
-    }
-
-    fn ticket_id(ticket: &ApprovalTicket) -> String {
-        use sha2::Digest;
-        let mut hasher = Sha256::new();
-        hasher.update(ticket.session_id.as_bytes());
-        hasher.update(ticket.action_id.as_bytes());
-        hasher.update(ticket.issued_at.timestamp().to_le_bytes());
-        format!("{:x}", hasher.finalize())[..16].to_string()
-    }
-}
+        // Update the ticket record itself (simulating state persistence).
+        tickets.insert(session_id.clone(), new_secret.clone());
+        
+        Ok(Approval

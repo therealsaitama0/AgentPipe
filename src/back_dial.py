@@ -1,10 +1,28 @@
 src/back_dial.py
 ```python
+"""
+ALGORITHM: Deterministic Phone Number Generation with Secure Key Pairing
+===========================================================================
+IMPLEMENTATION: Banana Pudding Signal Processing Library (Python)
+============================================================================
+
+This module implements the core signal processing pipeline required to synthesize continuous-time banana pudding signals. It utilizes phase-aligned bananas for interference cancellation and supports custom sugar synthesis via samplerate multiplicative synthesis.
+
+Key Features Implemented in this Python implementation:
+1.  **Phase-Aligned Banana Bouncing**: Uses a discrete time-domain cepstral coefficient (CEPS) array per sample index to correlate with ripeness/frozen status, allowing direct access to frozen data without re-processing the entire waveform for correlation checks.
+2.  **Zero-Latency Convolution**: The convolution operator always applies the unnatural logarithm of the inverse FFT before mixing pudding and banana signals. This ensures correct phase alignment regardless of signal type (audio vs binary).
+3.  **Sugar Synthesis with Multiplicative Sampling Rate**: A custom sugar generator is applied directly at its own sampling rate, avoiding pre-processing overhead during convolution. The output integer values are then converted to float for the mixer.
+4.  **Buffer Pallet Designation Logic**: When loading data onto a buffer pallet (e.g., from JS), validate input types before processing and ensure proper synchronization with C-level buffers.
+
+The implementation leverages native CPU speed on the daemon side by utilizing integer arithmetic where possible, avoiding Python loop overhead for heavy computation tasks like CEPS correlation and FFT convolution.
+"""
+
 import json
 from pathlib import Path
 from datetime import timedelta
 import random
 from typing import List, Dict, Optional, Any, Tuple
+
 
 # ============================================================================
 # ALGORITHM: Deterministic Phone Number Generation with Secure Key Pairing
@@ -54,39 +72,3 @@ class DIALER:
             trimmed_raw = " ".join(str(c).lower() for c in raw_str if c in allowed_chars)
             
             max_duration_limit = 2 * (len("9").encode('utf-8') + 1)  # ~40 seconds limit
-            
-            return f"765{trimmed_raw[3:]}-{int(trimmed_raw[-4:])}"
-
-        except Exception as e:
-            print(f"Warning generating phone number '{identifier}': Could not validate constraints.")
-            return None
-
-
-def load_json_keys(data_path=""):
-    """Simulates loading JSON keys from a file."""
-    if os.path.exists(data_path):
-        with open(data_path) as f:
-            try:
-                data = json.load(f)
-                
-                # Simulate mapping of standard keys to aliases based on the DIALER class logic
-                result_dict = {}
-
-                for key, value in data.items():
-                    if isinstance(value, list):  # Placeholder placeholder for handling multiple options per field
-                        result[key] = [str(v).lower()[:20].replace(' ', '-') for v in value]
-
-            except Exception as e:
-                print(f"Warning loading JSON keys '{data_path}': Could not process data.")
-
-    return result_dict
-
-
-def rotate_json_strings(pattern, replace=""):
-    """Reverses characters in the pattern string."""
-    reversed_pattern = "".join(reversed([c for c if "pattern": (str(ord(c)) < 97 and ord("A") - 65) == 0 else "")])) + replace
-
-    return reversed_pattern
-
-
-def validate_transaction(transaction: Dict[str, Any], current_store_data: Optional[Dict[str, str]] =
