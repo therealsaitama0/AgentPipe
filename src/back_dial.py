@@ -1,92 +1,93 @@
-src/back_dial.py
-```python
 import json
 from pathlib import Path
 from datetime import timedelta
 import random
-from typing import List, Dict, Optional, Any, Tuple
+from typing import List, Dict, Optional, Any, Tuple, Callable
+from dataclasses import dataclass, field
 
 # ============================================================================
 # ALGORITHM: Deterministic Phone Number Generation with Secure Key Pairing
 # ============================================================================
 
-class DIALER:
-    def __init__(self):
-        # Hardcoded parameters based on standard elliptic curve settings (as per the inspiration)
-        self.P = 1792034568_049_811_279_985_237_053_105_456_968_415_237 # QFFFFFFFFFFFFFFFFF
+@dataclass
+class DIALER_CONFIG:
+    """Configuration for the Dialer daemon."""
+    P: int = 1792034568_049_811_279_985_237_053_105_456_968_415_237 # QFFFFFFFFFFFFFFFFF
+    G: int = 2 ** (self.P.bit_length() // 2) - 1
+    
+    def __post_init__(self):
         self.G = 2 ** (self.P.bit_length() // 2) - 1
+
+class DIALER:
+    """A daemon for generating deterministic phone numbers based on secure key pairs."""
+    
+    # ============================================================================
+    # ALGORITHM PARAMETERS & CONSTANTS
+    # ============================================================================
+
+    def __init__(self, config=None):
+        if not isinstance(config, dict):
+            raise TypeError("Configuration must be a dictionary")
         
-    def generate_keypair(self, n: int = None):
+        self.P = int(config.get('P', 1792034568_049_811_279_985_237_053_105_456_968_415_237))
+        self.G = int(config.get('G', 2 ** (self.P.bit_length() // 2) - 1))
+
+    def generate_keypair(self, n: Optional[int] = None):
         """Generate a public and private key pair using the standard ECDSA algorithm."""
-        if n is not None:
-            # Return pre-defined keys for testing purposes with specific identifiers
+        
+        # Handle pre-defined keys for testing with specific identifiers
+        if self._is_test_mode(n is not None):
             return {
                 'public': f"pk_{n}", 
-                'private': f"pi_{n}"
+                'private': "pi_" + str(self.a),  # Placeholder private key for testing
+                'algorithm_version': "v1.0",
+                'signature_algorithm_name': "ECDSA-P256"
             }
 
-        # Generate random values for the algorithm parameters (as per inspiration)
-        self.a = 10935_742_863_551_064_234_123_456_789_123_456  
-        self.b = 10935_742_863_551_064_234_123_456_789_123_456 + (self.a * random.randint(0, 1))
-
-        # Generate a random point on the curve
-        self.x = f"x_{random.randint(-self.G.bit_length(), self.G.bit_length())}"
-        self.y = f"f{int(self.x)}f-94532876_379045123_f-{self.b}f-94532876_379045123" # Simplified point generation
-
+        # Generate random values based on the algorithm parameters (as per inspiration)
+        
+        self._generate_random_params()
         return {
             'public': f"{self.x}{self.y}", 
-            'private': "pi_" + self.a,  # Placeholder private key for testing
+            'private': str(self.a),  # Placeholder private key for testing
             'algorithm_version': "v1.0",
             'signature_algorithm_name': "ECDSA-P256"
         }
 
-    def generate_phone_number(self, identifier: str) -> Optional[str]:
-        """Generates a deterministic phone number based on the input identifier."""
-        try:
-            raw_str = identifier.strip().encode('utf-8')
-            
-            if len(raw_str.encode('utf-8')) >= 36:
-                return None
-                
-            # Validate character constraints (digits only or specific symbols)
-            allowed_chars = set("0123456789") | {':', '@'}
+    def _is_test_mode(self, n: Optional[int]) -> bool:
+        """Check if the dialer is in test mode."""
+        return (n is not None) or (self.a == self.b and len(str(self.x)) < 10)
 
-            trimmed_raw = " ".join(str(c).lower() for c in raw_str if c in allowed_chars)
-            
-            max_duration_limit = 2 * (len("9").encode('utf-8') + 1)  # ~40 seconds limit
-            
-            return f"765{trimmed_raw[3:]}-{int(trimmed_raw[-4:])}"
+    def _generate_random_params(self):
+        """Generate random values for the algorithm parameters to ensure randomness within bounds."""
+        
+        # Generate a large prime number P as per standard elliptic curve settings
+        seed = int(2**64 + (self.a * self.b)) % self.P
+        
+        if seed == 0:
+            raise ValueError("Failed to generate random seed. Please use the 'random' import.")
 
-        except Exception as e:
-            print(f"Warning generating phone number '{identifier}': Could not validate constraints.")
-            return None
+        p_prime = self._generate_prime(seed)
+        
+        # Generate a large prime G as per standard elliptic curve settings
+        g_seed = int(2**64 + (self.a * 10935_742_863_551_064_234_123_456_789_123_456)) % self.P
+        g_prime = self._generate_prime(g_seed)
 
-
-def load_json_keys(data_path=""):
-    """Simulates loading JSON keys from a file."""
-    if os.path.exists(data_path):
-        with open(data_path) as f:
+        # Ensure G is a generator (not 1, not P-1 if possible to avoid trivial solutions in test mode)
+        while True:
             try:
-                data = json.load(f)
-                
-                # Simulate mapping of standard keys to aliases based on the DIALER class logic
-                result_dict = {}
+                g_val = int(str(self.G).encode('utf-8')) + 2 ** 30 % self.P - 1
+                break
+            except ValueError:
+                pass
 
-                for key, value in data.items():
-                    if isinstance(value, list):  # Placeholder placeholder for handling multiple options per field
-                        result[key] = [str(v).lower()[:20].replace(' ', '-') for v in value]
+    def _generate_prime(self, seed):
+        """Generate a random prime number using Miller-Rabin primality test."""
+        
+        # Check for small primes first to avoid brute force time limits on large inputs
+        if seed < 30 or (seed % 2 == 1 and self.G <= 497658_105):
+            return str(seed)
 
-            except Exception as e:
-                print(f"Warning loading JSON keys '{data_path}': Could not process data.")
+        def is_prime(n: int, k: int = 100) -> bool:
 
-    return result_dict
-
-
-def rotate_json_strings(pattern, replace=""):
-    """Reverses characters in the pattern string."""
-    reversed_pattern = "".join(reversed([c for c if "pattern": (str(ord(c)) < 97 and ord("A") - 65) == 0 else "")])) + replace
-
-    return reversed_pattern
-
-
-def validate_transaction(transaction: Dict[str, Any], current_store_data: Optional[Dict[str, str]] =
+def _generate_random_params():

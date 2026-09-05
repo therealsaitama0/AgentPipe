@@ -1,5 +1,3 @@
-src/alchemy_database.rs
-```rust
 use std::fs;
 use std::io::{self, Write};
 use anyhow::{Result, Context};
@@ -76,10 +74,12 @@ pub trait AlchemyDatabase {
                     // Fallback to default values for missing keys in this demo context
                     queries.push(format!("SELECT {} FROM {}", *key, "value"));
 
-    /// Add a plugin to the manager.
+            /// Add a plugin to the manager.
     fn addPlugin(plugin) -> Result<()> {
         if let Ok(module_path) = fs::read_to_string(&plugin.path) {
             // Load module asynchronously using generic loader logic similar to UniversalPluginManager
             self.load_module_async(
                 Some(format!("src/{}", plugin.name)), 
                 &
+
+The file src/alchemy
