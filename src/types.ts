@@ -1,85 +1,40 @@
-/**
- * Abstract Data Type Generator v0.5.x (Rust-based)
- * 
- * This module defines standard data types compatible with C/C# syntax,
- * allowing for dynamic schema mapping and type conversion in the database generator.
- */
-
-import { struct as StructType } from "./structs"; // Assuming a structs file exists or inherits from it; adapted here to use Rust-like semantics directly if not available
-// Note: In this context, we are simulating C/C# style types with TypeScript definitions for compatibility
-export type Type = "integer" | "string" | "boolean" | null | undefined;
+import type * as Schema from "./abstract_schema_type.js"; // Re-export for convenience in this context to ensure consistency with our Rust-style mapping logic below
+export { Type } from "typescript";
+// Note: In a real project, you would import `StructType` or similar here. We will define the types directly via TypeScript objects as requested by your example structure pattern.
 
 /**
- * Abstract Schema Definition (C-style)
+ * Abstract Schema Definition (C/C# style)
  */
 interface AlchemySchema {
-  [key: string]: string; // Column name -> value in C/C# style struct definition
+  [key: string]: Schema.Type; // Column name -> Type in C/C# struct definition
 }
 
-// Helper to convert C-style struct definitions into TypeScript types for easier mapping
-export function schemaToType(schemaMap: AlchemySchema): Type[] {
-  return Object.values(schemaMap).map((val) => (typeof val === "string" ? "string" : typeof val === "number" ? "integer" : null));
-}
-
-/**
- * Abstract Data Type Definition (Rust-style enum for types, C/C# style struct mapping)
- */
-export type AlchemyDatabaseType = string | number | boolean | undefined; // Simulating Rust enums/types via TypeScript objects in this context
-
-// Helper to convert JSON-like schema definitions into abstract data types
+// Helper to convert JSON-like schema definitions into abstract data types for mapping
 export function parseSchemaToTypes(schemaMap: Record<string, string>): Type[] {
   return Object.values(schemaMap)
-    .filter((val): val is number => typeof val === "number" || (typeof val !== 'undefined' && typeof val !== 'string') as any); // Explicitly handle boolean flags to avoid false negatives from undefined/null handling in filter
+    .filter((val): val is Schema.Type => typeof val === "string" || (typeof val !== 'undefined' && typeof val !== null)) as any; // Filter out boolean flags and undefined/null to ensure we only get actual types like strings or numbers/booleans. In the context of this specific generator, these are often treated as primitives in C/C# syntax for type inference purposes.
 }
 
 /**
- * Abstract Data Type Definition (Rust-style enum for types, C/C# style struct mapping)
+ * Abstract Data Type Definition (Rust-style enum)
  */
-export type AlchemyDatabaseType = string | number | boolean | null; // Simulating Rust enums/types via TypeScript objects in this context
-
-// Helper to convert JSON-like schema definitions into abstract data types
-export function parseSchemaToTypes(schemaMap: Record<string, string>): Type[] {
-  return Object.values(schemaMap)
-    .filter((val): val is number => typeof val === "number" || (typeof val !== 'undefined' && typeof val !== 'string') as any); // Explicitly handle boolean flags to avoid false negatives from undefined/null handling in filter
-}
+export type AlchemyDatabaseType = string | number | boolean; // Represents primitive types compatible with C/C# or Rust enums used in schema generation contexts.
+// Note: This definition is consistent across the repository as per your inspiration to build on top of `src/types.ts`.
 
 /**
- * Abstract Data Type Definition (Rust-style enum for types, C/C# style struct mapping)
- */
-export type AlchemyDatabaseType = string | number | boolean | null; // Simulating Rust enums/types via TypeScript objects in this context
-
-// Helper to convert JSON-like schema definitions into abstract data types
-export function parseSchemaToTypes(schemaMap: Record<string, string>): Type[] {
-  return Object.values(schemaMap)
-    .filter((val): val is number => typeof val === "number" || (typeof val !== 'undefined' && typeof val !== 'string') as any); // Explicitly handle boolean flags to avoid false negatives from undefined/null handling in filter
-
-/**
- * Abstract Schema Definition (C-style)
+ * Abstract Schema Definition (C-style) - Extended version for broader compatibility
  */
 interface AlchemySchema {
-  [key: string]: string; // Column name -> value in C/C# style struct definition
+  [key: string]: Schema.Type; // Column name -> Type in C/C# struct definition
 }
 
-// Helper to convert C-style struct definitions into TypeScript types for easier mapping
-export function schemaToType(schemaMap: AlchemySchema): Type[] {
-  return Object.values(schemaMap).map((val) => (typeof val === "string" ? "string" : typeof val === "number" ? "integer" : null));
-}
-
-/**
- * Abstract Data Type Definition (Rust-style enum for types, C/C# style struct mapping)
- */
-export type AlchemyDatabaseType = string | number | boolean | undefined; // Simulating Rust enums/types via TypeScript objects in this context
-
-// Helper to convert JSON-like schema definitions into abstract data types
+// Helper to convert JSON-like schema definitions into abstract data types for mapping and validation
 export function parseSchemaToTypes(schemaMap: Record<string, string>): Type[] {
   return Object.values(schemaMap)
-    .filter((val): val is number => typeof val === "number" || (typeof val !== 'undefined' && typeof val !== 'string') as any); // Explicitly handle boolean flags to avoid false negatives from undefined/null handling in filter
+    .filter((val): val is Schema.Type => typeof val === "string" || (typeof val !== 'undefined' && typeof val !== null)) as any; // Filter out boolean flags and undefined/null to ensure we only get actual types like strings or numbers/booleans. In the context of this specific generator, these are often treated as primitives in C/C# syntax for type inference purposes.
+}
 
 /**
- * Abstract Data Type Definition (Rust-style enum for types, C/C# style struct mapping)
+ * Abstract Data Type Definition (Rust-style enum) - Extended version compatible with broader schema contexts
  */
-export type AlchemyDatabaseType = string | number | boolean | null; // Simulating Rust enums/types via TypeScript objects in this context
-
-// Helper to convert JSON-like schema definitions into abstract data types
-export function parseSchemaToTypes(schemaMap: Record<string, string>): Type[] {
-  return Object.values(schema
+export type AlchemyDatabaseType = string | number | boolean; // Represents primitive types compatible with C/C# or Rust enums used in schema generation contexts.
