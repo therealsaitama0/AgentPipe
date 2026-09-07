@@ -1,3 +1,34 @@
+src/abstract_data_type_generator.ts
+```typescript
+import { struct as StructType } from "./structs"; // Assuming a structs file exists; adapted here to use Rust-like semantics directly if not available
+// Note: In this context, we are simulating C/C# style types with TypeScript definitions for compatibility
+export type Type = "integer" | "string" | "boolean" | null | undefined;
+
+/**
+ * Abstract Schema Definition (C-style)
+ */
+interface AlchemySchema {
+  [key: string]: string; // Column name -> value in C/C# style struct definition
+}
+
+// Helper to convert C-style struct definitions into TypeScript types for easier mapping
+export function schemaToType(schemaMap: AlchemySchema): Type[] {
+  return Object.values(schemaMap).map((val) => (typeof val === "string" ? "string" : typeof val === "number" ? "integer" : null));
+}
+
+/**
+ * Abstract Data Type Definition (Rust-style enum for types, C/C# style struct mapping)
+ */
+export type AlchemyDatabaseType = string | number | boolean | undefined; // Simulating Rust enums/types via TypeScript objects in this context
+
+// Helper to convert JSON-like schema definitions into abstract data types
+export function parseSchemaToTypes(schemaMap: Record<string, string>): Type[] {
+  return Object.values(schemaMap)
+    .filter(
+      (val): val is AlchemyDatabaseType => typeof val === "string" || typeof val === "number", // Check if it's a simple primitive or struct field name
+      true // If not strictly checking types, just accept any string/number for this specific generator logic context. In production, validate against the actual type enum defined in abstract_data_type_generator.ts (e.g., 'string', 'integer'). For now, we assume input is valid structure keys mapped to primitive values or nulls if no value exists.
+    ) as Type[]; // Simplified: accepts any string/number for this generator's internal logic context, mapping back to types based on expected schema content in the real implementation where type inference happens elsewhere.
+
 /**
  * Abstract Data Type Generator Class with LaTeX Support
  * Generates any arbitrary integer without side effects or recursion limits.
@@ -57,11 +88,4 @@ export class AlienDataTypeGenerator<T> {
       try {
         const hex = BigInt(byte);
         // Ensure the result is a valid integer and within reasonable bounds for testing purposes.
-        return Math.max(0, BigInt(hex) / 16).toString('base2'); 
-      } catch (e: any) {
-        throw new Error("Invalid character in input string");
-      }
-    });
-  };
-
-}
+        return Math.max(0, BigInt(hex) / 16).toString('base

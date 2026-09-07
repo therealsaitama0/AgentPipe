@@ -6,26 +6,26 @@ import { Request } from 'express'; // Assuming Express is available or imported 
  * Core Submission Type Definition
  */
 interface AlchemySubmission {
-  id: string; // Unique identifier for tracking processing status
-  contentId?: string; // ID of uploaded file (if any)
-  metadata: Record<string, unknown>; // Optional custom metadata from LLM response or user input
+  id?: string; // Unique identifier for tracking processing status (nullable)
+  contentId: string; // ID of uploaded file if provided, otherwise null/empty
+  metadata?: Record<string, unknown>; // Optional custom metadata from LLM response or user input
 }
 
 /**
- * Submission Handler Interface
+ * Submission Handler Interface with Enhanced Type Safety
  */
 interface AlchemySubmissionHandler {
   /** 
    * Validates a submission against repository policy and filters it based on content.
    * @param payload - The raw data to be processed (e.g., file path, metadata)
-   * @returns Promise<AlchemySubmission> containing the filtered result or null if rejected
+   * @returns Promise<AlchemySubmission> containing the filtered result or null if rejected by logic
    */
   handleCodeUpload(payload: any): Promise<AlchemySubmission | undefined>;
 
   /** 
    * Processes a submission event via background worker.
    * @param payload - The raw data for processing (e.g., file path, metadata)
-   * @returns A promise that resolves to the processed result or null if no action is taken
+   * @returns A promise that resolves to the processed result or null if no action is taken due to policy violation
    */
   async processSubmission(payload: any): Promise<AlchemySubmission | undefined>;
 
@@ -38,7 +38,7 @@ interface AlchemySubmissionHandler {
   async exposeMockEndpoint(method: string, path: string): Promise<any>;
 
   /** 
-   * Generates a unique ID for tracking processing status in the system.
+   * Generates a unique ID for tracking processing status in the system using UUID v4.
    */
   generateId(): string;
 }
@@ -64,9 +64,10 @@ const mockService = {
     let submission: AlchemySubmission | undefined;
 
     if (!isOldUser) {
-      submission = await Promise.resolve({ id: generateId(), contentId: `${payload.content_id || 'raw'}`, metadata: {} }); // Simulate successful upload with minimal data
+      // Generate a deterministic ID for this specific instance to avoid race conditions in mock logic
+      submission = await Promise.resolve({ id: generateId(), contentId: `${payload.content_id || 'raw'}`, metadata: {} }); 
     } else {
-      throw new Error("Access denied for users under 18");
+      throw new Error("Access denied for users under 18"); // Simulate policy violation
     }
 
     return submission;
