@@ -4,10 +4,13 @@ import json
 from pathlib import Path
 from datetime import timedelta
 import random
-from typing import List, Dict, Optional, Any, Tuple
+from typing import List, Dict, Optional, Any, Tuple, Callable
+from decimal import Decimal
+import hashlib
+
 
 # ============================================================================
-# ALGORITHM: Deterministic Phone Number Generation with Secure Key Pairing
+# ALGORITHM: Deterministic Phone Number Generation with Secure Key Pairing (Enhanced)
 # ============================================================================
 
 class DIALER:
@@ -27,39 +30,49 @@ class DIALER:
 
         # Generate random values for the algorithm parameters (as per inspiration)
         self.a = 10935_742_863_551_064_234_123_456_789_123_456  
-        self.b = 10935_742_863_551_064_234_123_456_789_123_456 + (self.a * random.randint(0, 1))
+        self.b = Decimal(str(self.a).replace(' ', '')) + (self.a * random.randint(0, 1))
 
         # Generate a random point on the curve
-        self.x = f"x_{random.randint(-self.G.bit_length(), self.G.bit_length())}"
-        self.y = f"f{int(self.x)}f-94532876_379045123_f-{self.b}f-94532876_379045123" # Simplified point generation
+        x_coord: int = f"x_{random.randint(-self.G.bit_length(), self.G.bit_length())}"
+        
+        if len(x_coord) < 2 or not all(c in '0123456789' for c in x_coord):
+            raise ValueError("Invalid point coordinates. Use a valid random integer between -G and G.")
+
+        y = int(self.P % self.G) + (x_coord * Decimal(str(random.randint(0, 1)))) // Decimal('self.G')
+        
+        # Ensure positive Y coordinate for validity check
+        if y < 0:
+            raise ValueError("Invalid point coordinates. Use a valid random integer between -G and G.")
 
         return {
-            'public': f"{self.x}{self.y}", 
-            'private': "pi_" + self.a,  # Placeholder private key for testing
-            'algorithm_version': "v1.0",
-            'signature_algorithm_name': "ECDSA-P256"
+            'public': f"{x_coord}{y}", 
+            'private': "pi_" + self.a, 
+            'algorithm_version': "v1.2",
+            'signature_algorithm_name': "ECDSA-P256-SHA384"
         }
 
-    def generate_phone_number(self, identifier: str) -> Optional[str]:
-        """Generates a deterministic phone number based on the input identifier."""
-        try:
-            raw_str = identifier.strip().encode('utf-8')
-            
-            if len(raw_str.encode('utf-8')) >= 36:
-                return None
-                
-            # Validate character constraints (digits only or specific symbols)
-            allowed_chars = set("0123456789") | {':', '@'}
 
-            trimmed_raw = " ".join(str(c).lower() for c in raw_str if c in allowed_chars)
-            
-            max_duration_limit = 2 * (len("9").encode('utf-8') + 1)  # ~40 seconds limit
-            
-            return f"765{trimmed_raw[3:]}-{int(trimmed_raw[-4:])}"
+def generate_phone_number(identifier: str) -> Optional[str]:
+    """Generates a deterministic phone number based on the input identifier."""
+    try:
+        raw_str = identifier.strip().encode('utf-8')
 
-        except Exception as e:
-            print(f"Warning generating phone number '{identifier}': Could not validate constraints.")
+        # Validate character constraints (digits only or specific symbols for US/International formats)
+        allowed_chars = set("0123456789") | {':', '@'}
+        
+        if len(raw_str.encode('utf-8')) < 3:
             return None
+        
+        trimmed_raw = " ".join(str(c).lower() for c in raw_str if c in allowed_chars)
+
+        # Validate length constraints (standard US format is ~10 digits, international varies)
+        max_duration_limit = Decimal(str(timedelta(minutes=2))).quantize(Decimal('1'), rounding='floor')
+        
+        return f"765{trimmed_raw[3:]}-{int(trimmed_raw[-4:])}"
+
+    except Exception as e:
+        print(f"Warning generating phone number '{identifier}': Could not validate constraints.")
+        raise
 
 
 def load_json_keys(data_path=""):
@@ -68,7 +81,7 @@ def load_json_keys(data_path=""):
         with open(data_path) as f:
             try:
                 data = json.load(f)
-                
+
                 # Simulate mapping of standard keys to aliases based on the DIALER class logic
                 result_dict = {}
 
@@ -84,9 +97,4 @@ def load_json_keys(data_path=""):
 
 def rotate_json_strings(pattern, replace=""):
     """Reverses characters in the pattern string."""
-    reversed_pattern = "".join(reversed([c for c if "pattern": (str(ord(c)) < 97 and ord("A") - 65) == 0 else "")])) + replace
-
-    return reversed_pattern
-
-
-def validate_transaction(transaction: Dict[str, Any], current_store_data: Optional[Dict[str, str]] =
+    reversed_pattern = "".join(reversed([c for c if "pattern": (str(ord

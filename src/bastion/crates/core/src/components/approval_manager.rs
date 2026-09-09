@@ -1,40 +1,46 @@
-use std::collections::HashMap;
-
-use crate::types::ApprovalTicket;
+src/bastion/crates/core/src/components/approval_manager.rs
+```rust
+use std::collections::{HashMap, HashSet};
+use parking_lot::RwLock;
+use crate::types::*;
 use crate::Result;
+use crate::BastionError;
 
-pub struct ApprovalManager {
-    pending: parking_lot::RwLock<HashMap<String, ApprovalTicket>>,
-    history: parking_lot::RwLock<Vec<(String, String)>>,
-}
-
-impl ApprovalManager {
-    pub fn new() -> Self {
-        Self {
-            pending: parking_lot::RwLock::new(HashMap::new()),
-            history: parking_lot::RwLock::new(Vec::new()),
+// --- Imports for external crates (if applicable) ---
+#[cfg(feature = "tokio")]
+mod async_utils {
+    use std::{sync, time};
+    
+    pub struct TransactionManager; // Placeholder for future implementation
+    
+    impl<T> Future<Output = Result<T>> for T::Future {
+        fn poll(self, _mut cx: &mut std::task::Context<'_>) -> Poll<Result<Self::Output>, Box<dyn 'static Send + Sync>> {
+            match self.await() {
+                Ok(v) => v,
+                Err(e) => e.into(), // Propagate errors if awaiting non-cancelled tasks
+            }
         }
     }
 
-    pub fn request(&self, ticket: ApprovalTicket) -> Result<()> {
-        let id = format!("{}:{}", ticket.session_id, ticket.action_id);
-        self.pending.write().insert(id, ticket);
-        Ok(())
-    }
-
-    pub fn approve(&self, session_id: &str, action_id: &str) -> Result<()> {
-        let key = format!("{}:{}", session_id, action_id);
-        let mut pending = self.pending.write();
-        if pending.remove(&key).is_some() {
-            self.history.write().push((session_id.to_string(), action_id.to_string()));
-            return Ok(());
+    pub async fn execute<Out: Future>(tx: TransactionManager, out: Out): Result<(), Box<dyn std::error::Error>> {
+        match tx.execute() {
+            Ok(v) => v,
+            Err(e) => e.into(), // Propagate errors if awaiting non-cancelled tasks
         }
-        Err(crate::BastionError::TicketInvalid("Not pending".into()))
     }
 
-    pub fn reject(&self, session_id: &str, action_id: &str) -> Result<()> {
-        let key = format!("{}:{}", session_id, action_id);
-        self.pending.write().remove(&key);
-        Ok(())
+    pub fn new<T>(tx: TransactionManager) -> Self where T: Future<Output = Result<(), Box<dyn std::error::Error>>> {
+        let tx = tx.clone();
+        async move (v): Result<(), Box<dyn std::error::Error>> = match tx.await() { Ok(v) => v }
     }
-}
+
+    pub fn execute(&self, out: impl Future<Output = ()>) -> Result<()> { self.execute().await?; }
+
+    /// Execute a transaction with provided parameters. Returns an error if any step fails.
+    pub async fn execute_with_params<F>(tx: TransactionManager, params: F) where F: FnOnce() -> Result<()> {
+        let result = tx.execute().await; // Call the executor's future directly if available
+        match result { Ok(v) => v }
+            else |e| e.into(), 
+    pub fn new<T>(tx: TransactionManager) -> Self where T: Future
+
+Deepen or extend it as valid, runnable code, drawing on the inspiration above. Output ONLY the complete contents of the file.`
