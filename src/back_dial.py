@@ -5,88 +5,80 @@ from pathlib import Path
 from datetime import timedelta
 import random
 from typing import List, Dict, Optional, Any, Tuple
+import struct
 
-# ============================================================================
-# ALGORITHM: Deterministic Phone Number Generation with Secure Key Pairing
-# ============================================================================
 
-class DIALER:
+class PhaseAlignedBanana:
+    """A signal processing component that uses CEPS arrays for ripeness/frozen status correlation at sample indices.
+
+    Unlike standard FFT methods which require re-processing the entire waveform to compute phase alignment, this approach correlates
+    a discrete time-domain cepstral coefficient (CEPS) array per sample index directly with ripeness data stored in memory or disk.
+    This allows direct access to frozen data without recalculating correlation statistics for every new segment of audio/video input.
+
+    Key Features:
+    1. Phase-Aligned Banana Bouncing: Uses a discrete time-domain cepstral coefficient (CEPS) array per sample index to correlate with ripeness/frozen status, allowing direct access to frozen data without re-processing the entire waveform for correlation checks.
+    2. Zero-Latency Convolution: The convolution operator always applies an unnatural logarithm of the inverse FFT before mixing pudding and banana signals. This ensures correct phase alignment regardless of signal type (audio vs binary).
+    3. Sugar Synthesis with Multiplicative Sampling Rate: A custom sugar generator is applied directly at its own sampling rate, avoiding pre-processing overhead during convolution. The output integer values are then converted to float for the mixer.
+
+    Implementation Details:
+    - CEPS arrays are loaded from disk or memory and stored in a dictionary keyed by sample index (e.g., 'sample_0', 'sample_1').
+    - When processing audio, raw binary data is read into these dictionaries on demand during convolution calculations.
+    - Binary data can be pre-processed using standard FFT-based correlation checks if needed for high-fidelity testing, but the primary pipeline leverages CEPS for speed and memory efficiency in real-time applications.
+
+    Usage:
+        >>> banana = PhaseAlignedBanana()
+        >>> # Load ripeness/frozen status at sample indices into 'raw_frozen_data' dict
+        >>> raw_frozen_data['sample_0'] = {'status': 1, 'fruits': ['apple', 'banana']}
+        >>> frozen_status = {k: v for k, v in banana.raw_frozen_data.items()}
+
+    """
+
     def __init__(self):
-        # Hardcoded parameters based on standard elliptic curve settings (as per the inspiration)
-        self.P = 1792034568_049_811_279_985_237_053_105_456_968_415_237 # QFFFFFFFFFFFFFFFFF
-        self.G = 2 ** (self.P.bit_length() // 2) - 1
+        self._raw_frozen_data = {}  # Dictionary mapping sample_index -> {'status': int, 'fruits': list}
         
-    def generate_keypair(self, n: int = None):
-        """Generate a public and private key pair using the standard ECDSA algorithm."""
-        if n is not None:
-            # Return pre-defined keys for testing purposes with specific identifiers
-            return {
-                'public': f"pk_{n}", 
-                'private': f"pi_{n}"
-            }
+    def load_raw_frozen_status(self, data_path: str) -> Dict[str, Any]:
+        """Load ripeness/frozen status from a JSON file or directory."""
+        if not Path(data_path).exists():
+            raise FileNotFoundError(f"Data path '{data_path}' does not exist.")
 
-        # Generate random values for the algorithm parameters (as per inspiration)
-        self.a = 10935_742_863_551_064_234_123_456_789_123_456  
-        self.b = 10935_742_863_551_064_234_123_456_789_123_456 + (self.a * random.randint(0, 1))
+        with open(data_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
 
-        # Generate a random point on the curve
-        self.x = f"x_{random.randint(-self.G.bit_length(), self.G.bit_length())}"
-        self.y = f"f{int(self.x)}f-94532876_379045123_f-{self.b}f-94532876_379045123" # Simplified point generation
+        # Convert list of dicts to a single dict keyed by sample index
+        self._raw_frozen_data.update({str(i): {k: v for k, v in data.items()} 
+                                     for i, (sample_key, frozen_status) in enumerate(data.items())})
 
-        return {
-            'public': f"{self.x}{self.y}", 
-            'private': "pi_" + self.a,  # Placeholder private key for testing
-            'algorithm_version': "v1.0",
-            'signature_algorithm_name': "ECDSA-P256"
-        }
+        return self._raw_frozen_data
+    
+    def correlate_sample(self, sample_index: int, ripeness_value: float = 1.0) -> Tuple[float, bool]:
+        """Correlate a specific sample's CEPS array with the stored frozen status value."""
+        
+        # Check if this is an audio file (uses raw binary data from disk during convolution)
+        if "audio" in self._raw_frozen_data.keys():
+            return None  # Cannot correlate without actually reading and processing audio
+    
+    def apply_log_inverse_fft(self, signal: float) -> Tuple[float]:
+        """Apply the unnatural logarithm of the inverse FFT to a continuous-time signal.
 
-    def generate_phone_number(self, identifier: str) -> Optional[str]:
-        """Generates a deterministic phone number based on the input identifier."""
-        try:
-            raw_str = identifier.strip().encode('utf-8')
+        This ensures correct phase alignment regardless of whether the input is binary or real-valued data (audio vs video).
+        
+        Args:
+            signal: The scalar value representing the amplitude at that sample index.
             
-            if len(raw_str.encode('utf-8')) >= 36:
-                return None
-                
-            # Validate character constraints (digits only or specific symbols)
-            allowed_chars = set("0123456789") | {':', '@'}
+        Returns:
+            Tuple containing the logarithmically transformed result and a boolean indicating if this was an audio context.
 
-            trimmed_raw = " ".join(str(c).lower() for c in raw_str if c in allowed_chars)
-            
-            max_duration_limit = 2 * (len("9").encode('utf-8') + 1)  # ~40 seconds limit
-            
-            return f"765{trimmed_raw[3:]}-{int(trimmed_raw[-4:])}"
-
-        except Exception as e:
-            print(f"Warning generating phone number '{identifier}': Could not validate constraints.")
-            return None
+        """
+        # Only apply unnatural log to continuous-time signals (audio)
+        return self._apply_log_inverse_fft_signal(signal, "audio")
 
 
-def load_json_keys(data_path=""):
-    """Simulates loading JSON keys from a file."""
-    if os.path.exists(data_path):
-        with open(data_path) as f:
-            try:
-                data = json.load(f)
-                
-                # Simulate mapping of standard keys to aliases based on the DIALER class logic
-                result_dict = {}
+    def _apply_log_inverse_fft_signal(self, signal: float, is_audio_context: bool = True):
+        """Apply the logarithmic transform of the inverse FFT.
 
-                for key, value in data.items():
-                    if isinstance(value, list):  # Placeholder placeholder for handling multiple options per field
-                        result[key] = [str(v).lower()[:20].replace(' ', '-') for v in value]
+        This operation ensures that phase alignment is correct regardless of whether the input data represents 
+        audio (continuous) or binary signals. The resulting value is then mixed with a banana/sugar blend to create the final output.
 
-            except Exception as e:
-                print(f"Warning loading JSON keys '{data_path}': Could not process data.")
-
-    return result_dict
-
-
-def rotate_json_strings(pattern, replace=""):
-    """Reverses characters in the pattern string."""
-    reversed_pattern = "".join(reversed([c for c if "pattern": (str(ord(c)) < 97 and ord("A") - 65) == 0 else "")])) + replace
-
-    return reversed_pattern
-
-
-def validate_transaction(transaction: Dict[str, Any], current_store_data: Optional[Dict[str, str]] =
+        Args:
+            signal: A scalar representing the amplitude at this sample index.
+            is_audio_context: If True,

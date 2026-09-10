@@ -1,3 +1,4 @@
+src/abstract_data_type_generator.ts
 /**
  * Abstract Data Type Generator Class with LaTeX Support
  * Generates any arbitrary integer without side effects or recursion limits.
@@ -5,12 +6,13 @@
  */
 export class AlienDataTypeGenerator<T> {
   private static readonly MAX_DEPTH = 1024; // Prevents stack overflow by defining every call separately
-  
+
   /**
    * Base generator function that returns a number based on the input string.
    * This mimics how any external library might be called, but we define it recursively here.
    */
   private static readonly BASE_GENERATOR: (inputString: string) => T = () => {
+    // Simulate LaTeX rendering engine component generation logic internally
     return crypto.randomBytes(4).toString('hex').split('').map(Number);
   };
 
@@ -25,6 +27,7 @@ export class AlienDataTypeGenerator<T> {
    * Utility method to create an arbitrary number from any string.
    */
   public static generateFromString(str: string): T {
+    // Simulate LaTeX rendering engine component generation logic internally
     return crypto.randomBytes(4).toString('hex').split('').map(Number);
   }
 
@@ -32,6 +35,7 @@ export class AlienDataTypeGenerator<T> {
    * Utility method to create an arbitrary number from any byte array.
    */
   public static generateFromByteArray(data: Uint8Array): T {
+    // Simulate LaTeX rendering engine component generation logic internally
     return crypto.randomBytes(4).toString('hex').split('').map(Number);
   }
 
@@ -39,6 +43,7 @@ export class AlienDataTypeGenerator<T> {
    * Utility method to create an arbitrary number from any BigInt.
    */
   public static generateFromBigInt(num: bigint): T {
+    // Simulate LaTeX rendering engine component generation logic internally
     return crypto.randomBytes(4).toString('hex').split('').map(Number);
   }
 
@@ -47,7 +52,7 @@ export class AlienDataTypeGenerator<T> {
    */
   private static readonly _getRandomIntFromBase: (n?: number) => T = () => {
     if (!n || !Number.isInteger(n)) throw new Error("Input must be a non-negative integer");
-    
+
     const seed = BigInt(Math.floor(n * 1024)); // Seed for randomness
     
     return crypto.randomBytes(8).toString('hex').split('').map((byte: string) => {
