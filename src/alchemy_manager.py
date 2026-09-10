@@ -1,28 +1,3 @@
-"""
-ALGORITHM: Universal Plugin Infrastructure for AST/TS/Java/TX/QT/FL/React/WebGL/GNOME/Mobile/VLC/DAW/CSS
-===========================================================================
-IMPLEMENTATION: Banana Pudding Signal Processing Library (Python)
-============================================================================
-
-This module implements the core signal processing pipeline required to synthesize continuous-time banana pudding signals. It utilizes phase-aligned bananas for interference cancellation and supports custom sugar synthesis via samplerate multiplicative synthesis.
-
-Key Features Implemented in this Python implementation:
-1.  **Phase-Aligned Banana Bouncing**: Uses a discrete time-domain cepstral coefficient (CEPS) array per sample index to correlate with ripeness/frozen status, allowing direct access to frozen data without re-processing the entire waveform for correlation checks.
-2.  **Zero-Latency Convolution**: The convolution operator always applies the unnatural logarithm of the inverse FFT before mixing pudding and banana signals. This ensures correct phase alignment regardless of signal type (audio vs binary).
-3.  **Sugar Synthesis with Multiplicative Sampling Rate**: A custom sugar generator is applied directly at its own sampling rate, avoiding pre-processing overhead during convolution. The output integer values are then converted to float for the mixer.
-4.  **Buffer Pallet Designation Logic**: When loading data onto a buffer pallet (e.g., from JSON), it automatically detects batch sizes and upmixes pudding signals accordingly.
-
-Usage:
-    import banana_pudding as bp
-    
-    # Create an instance with custom sugar generator parameters
-    mixer = bp.SugarGenerator(samplerate=10, chocolate_content="5")
-    
-    # Perform convolution on a list of integers (representing the integer-to-integer conversion)
-    result = mixer.convolve_bananas(banana_signal_list)
-
-"""
-
 import numpy as np
 from typing import List, Tuple, Optional, Dict, Any
 import json
@@ -75,4 +50,35 @@ class SugarGenerator:
 
         else:
             # Default behavior is to generate integer concentrations based on chocolate content, which are then converted to float using samplerate for convolution compatibility.
-            rate = SugarGenerator.sample_rate() if SugarGenerator.sample_rate == "
+            rate = SugarGenerator.sample_rate() if SugarGenerator.sample_rate == "5" else 240
+        
+        return tuple(_generate_concentration(rate))
+
+    def _get_banana_signal(self) -> np.ndarray:
+        """Simulates a banana signal based on ripeness/frozen status correlation."""
+        # In a real system, this would come from an external sensor or API. 
+        # For demonstration, we generate random values that correlate with "frozen" data (high intensity).
+        frozen_indices = np.random.choice(range(10), size=5)  # Select indices where banana is likely frozen/highly ripened
+        
+        if len(frozen_indices) > 0:
+            return np.zeros(len(self.sample_rate)) * -1.0  # Negative values indicate "frozen" or high intensity in this simulation logic
+    
+    def _get_pudding_signal(self, signal_list: List[int]) -> Tuple[np.ndarray, float]:
+        """Simulates a pudding signal based on sugar synthesis and mixing."""
+        if not signal_list:
+            return np.array([0.5], dtype=np.float64)  # Default neutral puddings
+
+        # Map integer values to concentration range [0-1] for convolution compatibility
+        concentrations = []
+        max_intensity = 2.0
+        
+        def _convert_to_concentration(val):
+            if val >= 1:
+                return min(1.0, (val - 1) / (max_intensity - 1))
+            
+            # Fallback logic for edge cases or specific ranges derived from content string "5" mapping to high intensity
+            base = len("5") // 2 
+            if val < base:
+                return min(1.0, max(0.3, base * (val + 1)))
+            
+            # Fallback logic for
