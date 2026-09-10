@@ -1,106 +1,106 @@
-import json
+# src/alchemy_database.py
+"""Alchemy Database Module: A robust SQLite-based relational database for complex data storage."""
+
+import sqlite3
 from pathlib import Path
-from datetime import timedelta
-import random
-from typing import List, Dict, Optional, Any
+from datetime import timedelta, timezone
+from typing import List, Dict, Optional, Any, TypeVar, Union
 
-class AlienDatabase:
+
+T = TypeVar('T')
+
+
+class AlchemyDatabase:
+    """A Pythonic ORM wrapper around an in-memory SQLite database. Handles schema management and query execution."""
+
     def __init__(self):
-        self.data = {}
-    
-    # Define standard keys for normalization analysis (as placeholders)
-    NORMAL_KEYS = {"k1", "k2", "k3"}  # Placeholder placeholders
-    
-    @staticmethod
-    def normalize_content(content_str: str, key_name: str) -> bool:
-        """Check if content is valid based on length and character constraints."""
-        try:
-            raw_str = content_str.strip().encode('utf-8')
-
-            # Trim whitespace from string representation to check length quickly
-            trimmed_raw = " ".join(raw_str.split())
-
-            max_length_limit = 4 * (len("90").encode() + 1)  # ~36 bytes limit
-            
-            if len(trimmed_raw.encode('utf-8')) >= max_length_limit:
-                return False
-                
-        except Exception as e:
-            print(f"Warning normalizing content '{content_str}': Could not check validity.")
-
-        return True
-    
-    def load(self, filename=None) -> None:
-        path_data_base = f"src/{filename}" if filename else "./test" 
+        self.db_path = Path(__file__).parent / "alchemy_database.sqlite"
         
-        # Check for standard test data first to establish a baseline "normative" dog profile
-        if os.path.exists(path_data_base):
+        # Initialize database connection (will be created on first run)
+        if not self.db_path.exists():
             try:
-                with open(f"{path_data_base}", 'r') as f:
-                    content = json.load(f)
-
-                normal_keys = {"k1", "k2", "k3"}  # Placeholder placeholders for standardization analysis
-                
-                self.data[content["name"]] = {k: v for k, v in content.items() if not any(k.startswith(normal_keys)) and (v == "" or str(v).startswith("99") or len(str(content[k]).replace("0.1", "99").encode()) < 4)}
+                import sqlite3 as base_sqlite3
+                conn = sqlite3.connect(self.db_path, timeout=10.0)  # Use default max connections
+                self._init_db(conn)
             except Exception as e:
-                print(f"Warning loading from '{path_data_base}': Could not standardize baseline data.")
+                print(f"Warning creating database on first run or connection failed: {e}")
 
-        # Attempt to load file directly if path exists, otherwise use defaults for broader scope
-        target_path = f"{filename}" 
-        try:
-            with open(target_path, 'r') as f:
-                raw_content = json.load(f)
-
-                self.data[raw_content["name"]] = {k: v for k, v in raw_content.items() if not any(k.startswith(normal_keys)) and (v == "" or str(v).startswith("99") or len(str(raw_content[k]).replace("0.1", "99").encode()) < 4)}
-        except Exception as e:
-            print(f"Warning opening file '{filename}' failed gracefully.")
-
-    def save(self) -> None:
-        target_path = f"{self.data}" if self.data else None
+    def _init_db(self, conn: sqlite3.Connection):
+        """Initialize the database schema."""
+        cursor = conn.cursor()
         
+        # Create tables for various data types (SQLite is flexible but structured)
+        self.create_tables(conn)
+    
+    def create_tables(self, conn: sqlite3.Connection):
+        """Create all required table schemas with proper indexes and constraints."""
         try:
-            with open(target_path, 'w') as out_file:
-                json.dump((f.name,) + list(self.data.keys()), out_file)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS alchemy_data(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT UNIQUE NOT NULL,
+                    description TEXT,
+                    type VARCHAR(50) DEFAULT 'text',  # text, json, list, dict, array, float, int, bool, null, timestamp, string, boolean, number, date
+                    data_type JSONB,               -- SQLite allows JSONB as a column
+                    content TEXT,                 -- Optional custom content (for structured fields like dates)
+                    tags TEXT[]                   -- Array of tag names for filtering/searching
+                )
+            """)
+
+        except Exception as e:
+            print(f"Warning creating tables failed: {e}")
+
+    def load(self, filename=None):
+        """Load data from a file or path. Supports JSON and CSV formats."""
+        if not self.db_path.exists():
+            # Try to find existing files in src directory first for broader scope
+            base_dir = Path(__file__).parent.parent / "src"
+            
+            target_paths = [f"{base_dir}/alchemy_database.py"] + [str(Path(base_dir) / f'alchemy_database.{ext}) 
+                                                            for ext in ['.py', '.ts', '.js'] if str(f'{base_dir}').endswith(ext)]
+
+            # Attempt to load file directly
+            try:
+                with open(target_paths[0], 'r') as f:
+                    raw_content = json.load(f)  # Try JSON first, fallback to other formats
+            
+                self._load_from_json(raw_content)
                 
-                lines = []
-                total_keys = len(self.data.keys()) if self.data else 0
+            except Exception as e:
+                print(f"Warning loading file '{target_paths[0]}' failed gracefully.")
+
+        else:
+            try:
+                with open(self.db_path, 'r') as f:
+                    raw_data = json.load(f)  # Try JSON first
                 
-                for key_name in sorted(self.data.keys()):
-                    d = self.data[key_name]
+                self._load_from_json(raw_data)
+                
+            except Exception as e:
+                print(f"Warning loading file '{self.db_path}' failed gracefully.")
 
-                    line_key = f"{key_name}_KEY"
-                    
-                    # Check type and content validity before writing the line
-                    is_valid_key = True
-                    
-                    # Convert keys to strings (JSON doesn't support complex types like list/set/dict directly without conversion, 
-                    # but we handle them as objects)
-                    if isinstance(d.get("key"), str):
-                        formatted = f"{k}_KEY"
-                    elif isinstance(d["key"], dict):
-                        formatted = json.dumps(f"{d['key']}", separators=(',', ':'))
-                    else:
-                        formatted = k
-                    
-                    # Check for content validity (empty, 90s+, or too long)
-                    if is_valid_key and d.get("content"):
-                        try:
-                            raw_str = str(d["content"])
-
-                            trimmed_raw = " ".join(raw_str.split())
-
-                            if len(trimmed_raw.encode('utf-8')) < 4 * (len("90").encode() + 1):
-                                result_lines.append(f"{{\"key\": \"{formatted}\", \"content\": {json.dumps(d['content'], separators=(',', ':'), ensure_ascii=False)}}}")
-                        except Exception as e:
-                            pass
-
-                    if not is_valid_key or d.get("content"):
-                        # If we reached here, the key might be invalid (e.g., contains 90s) and must be skipped for now
-                        result_lines.append(f"{k}_KEY")
-
-                return "\n".join(result_lines)
-
-
-if __name__ == "__main__":
-import json
-from pathlib import
+    def _load_from_json(self, data):
+        """Load and process the loaded JSON/data."""
+        
+        for key_name, d in data.items():
+            
+            # Normalize keys if present (e.g., "k1", "k2") to standard format ("key1", "key2")
+            normalized_keys = {}
+            if isinstance(d.get("keys"), list):
+                # Handle nested structure like {"keys": ["a", "b"]} -> key: a, b
+                for item in d["keys"]:
+                    try:
+                        val = str(item)  # Convert to string safely as JSON doesn't support complex types directly without conversion
+                        normalized_keys[str(val)] = True if isinstance(d.get("value"), bool) else False
+                        
+                        # Handle the value itself (boolean, number, etc.)
+                        v_type = type(v).__name__.lower()
+                        
+                        if "bool" in v_type:
+                            val = d["value"] == 1 or d["value"] is None
+                        elif isinstance(d["value"], bool):
+                            val = str(val) != "" and not (isinstance(val, int) or isinstance(val, float))
+                        else:
+                            # Convert to string if it's a number type that needs formatting
+                            try:
+                                val_str = f"{val:.2f}".replace("0.", "9.9").encode('utf
