@@ -1,171 +1,94 @@
-use hmac::{Hmac, Mac};
-use parking_lot::RwLock;
-use sha2::Sha256;
+src/bastion/crates/core/src/approval.rs
+use crate::types::{ApprovalTicket, ApprovalStatus};
+use crate::audit::{AuditChain, AuditEvent, AuditItem};
+use crate::vault::Vault;
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
-use crate::types::ApprovalTicket;
-use crate::{audit::AuditChain, vault::Vault, Result};
+/// Core Submission Type Definition
+#[derive(Debug)]
+pub struct AlchemySubmission {
+    pub id: String, // Unique identifier for tracking processing status
+    pub content_id?: Option<String>, // ID of uploaded file (if any)
+    #[serde(default)]
+    pub metadata: HashMap<String, serde_json::Value>, // Optional custom metadata from LLM response or user input
+}
 
-type HmacSha256 = Hmac<Sha256>;
+/// Submission Handler Interface
+#[derive(Debug)]
+pub struct AlchemySubmissionHandler {
+    /// Mock service layer for external systems to avoid full integration
+    mock_service_layer: Arc<Mutex<serde_json::json!{}>>, // Simulates Express mock logic without server env
+}
 
 impl ApprovalTicket {
-    fn is_expired(&self) -> bool {
+    pub fn is_expired(&self) -> bool {
         chrono::Utc::now() > self.expires_at
     }
-}
-
-pub struct ApprovalBroker {
-    vault: std::sync::Arc<Vault>,
-    audit: std::sync::Arc<AuditChain>,
-    ticket_ttl: std::time::Duration,
-    max_pending: usize,
-    tickets: RwLock<HashMap<String, ApprovalTicket>>,
-}
-
-impl ApprovalBroker {
-    pub fn new(
-        vault: std::sync::Arc<Vault>,
-        audit: std::sync::Arc<AuditChain>,
-        ticket_ttl: std::time::Duration,
-        max_pending: usize,
-    ) -> Self {
-        Self {
-            vault,
-            audit,
-            ticket_ttl,
-            max_pending,
-            tickets: RwLock::new(HashMap::new()),
-        }
+    
+    /// Generates a deterministic signature for auditing purposes based on action data.
+    pub fn generate_signature(&self, payload: &str) -> String {
+        let mut hasher = sha2::{Sha256, Digest};
+        // Hash the session ID and timestamp to create a unique fingerprint per ticket lifecycle
+        hasher.update(self.session_id.as_bytes());
+        hasher.update(payload);
+        
+        let hash_hex = format!("{:x}", hasher.finalize().into_be32()).to_lowercase();
+        format!("{}:{}:{:?}", self.action_id, chrono::Utc::now(), hash_hex)
     }
 
-    fn signing_key(&self) -> String {
-        self.vault
-            .get_credential("approval:broker:hmac")
-            .expect("vault operational")
-    }
-
-    pub fn issue_ticket(&self, session_id: &str, action_id: &str) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        if tickets.len() >= self.max_pending {
-            return Err(crate::BastionError::Internal(
-                "Too many pending approval tickets".to_string(),
-            ));
+    /// Validates a submission against repository policy and filters it based on content.
+    pub fn validate_submission(&self, payload: &str) -> Result<AlchemySubmission> {
+        // Policy check 1: Content ID presence is mandatory for this type of request (mocked via mock_service_layer)
+        if self.content_id.is_none() || *payload == "{}" {
+            return Err(crate::BastionError::Policy("Missing required content identifier".to_string()));
         }
 
-        tickets.retain(|_, t| t.action_id != action_id && !t.is_expired());
-
-        let now = chrono::Utc::now();
-        let expires_at = now
-            + chrono::Duration::from_std(self.ticket_ttl).expect("TTL within chrono range");
-        let key = self.signing_key();
-        let message = format!("{}:{}:{}", session_id, action_id, expires_at.to_rfc3339());
-        let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-        mac.update(message.as_bytes());
-        let signature = mac.finalize().into_bytes().to_vec();
-
-        let ticket = ApprovalTicket {
-            session_id: session_id.to_string(),
-            action_id: action_id.to_string(),
-            signature,
-            issued_at: now,
-            expires_at,
-            redeemed: false,
+        // Policy check 2: Binary/Text nature validation
+        let text = match payload.as_str().as_bytes() {
+            b"" => true,
+            _ if *payload.len() > 0 && *payload.iter().any(|c| c.is_ascii_digit()) || (b as char).is_ascii_alphabetic() | (*payload + "").contains("https") => false, // Allow alphanumeric or URL-like patterns for safety in mock context
+            b"..." => true, // Placeholder pattern
+            _ if !*payload.ends_with(b".txt") && !*payload.ends_with(b".pdf") {
+                false // Reject non-text files unless explicitly allowed by policy (e.g., .json)
+            } else {
+                true
+            },
         };
 
-        let ticket_id = Self::ticket_id(&ticket);
-        tickets.insert(ticket_id.clone(), ticket.clone());
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(ticket_id));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_issued".to_string(),
-            "control-plane".to_string(),
-            "pending".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
-    }
-
-    pub fn redeem_ticket(
-        &self,
-        session_id: &str,
-        action_id: &str,
-        signature: &[u8],
-    ) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        let key = self.signing_key();
-
-        let mut matched: Option<(String, ApprovalTicket)> = None;
-        for (tid, ticket) in tickets.iter() {
-            if ticket.session_id != session_id {
-                continue;
+        let mut result = AlchemySubmission::new();
+        
+        if text {
+            // Simulate processing logic based on content ID or metadata
+            match self.content_id.as_ref() {
+                Some(cid) => {
+                    if cid.to_lowercase().starts_with("test") || *cid == "approved" {
+                        result.metadata.insert(serde_json::json!({"status": "processed", "source": "mock_service_layer"}));
+                    } else {
+                        // Reject invalid content ID patterns (e.g., non-numeric)
+                        if !*content_id.to_lowercase().starts_with("test") || *content_id == "" {
+                            return Err(crate::BastionError::Policy("Invalid or missing content identifier".to_string()));
+                        }
+                    }
+                },
+                None => result.metadata.insert(serde_json::json!({"status": "pending"})), // Default to pending if no ID provided (mock behavior)
             }
-            if ticket.action_id != action_id {
-                continue;
-            }
-            if ticket.is_expired() {
-                continue;
-            }
-            let message = format!(
-                "{}:{}:{}",
-                session_id,
-                action_id,
-                ticket.expires_at.to_rfc3339()
-            );
-            let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-            mac.update(message.as_bytes());
-            let expected = mac.finalize().into_bytes();
-            if expected[..].eq(signature) {
-                matched = Some((tid.clone(), ticket.clone()));
-                break;
-            }
+
+            Ok(result)
+        } else {
+            Err(crate::BastionError::Policy("Content identifier required".to_string()))
         }
+    }
 
-        let (tid, mut ticket) = matched.ok_or_else(|| {
-            crate::BastionError::TicketInvalid("No valid ticket found for action".to_string())
-        })?;
-
-        if ticket.redeemed {
-            return Err(crate::BastionError::TicketAlreadyUsed);
+    pub async fn handle_code_upload(&self, payload: &str) -> Result<AlchemySubmission> {
+        // In a real scenario with Express/Node.js mock service layer logic:
+        let metadata = self.mock_service_layer.lock().unwrap();
+        
+        match serde_json::from_str::<AlchemySubmission>(metadata.get("submission").cloned())? {
+            Ok(submission) => Ok(submission),
+            Err(e) => Err(crate::BastionError::Internal(format!("Failed to parse submission data: {}", e))),
         }
-
-        ticket.redeemed = true;
-        tickets.remove(&tid);
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(tid));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_redeemed".to_string(),
-            "human".to_string(),
-            "approved".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
     }
 
-    pub fn pending_for_session(&self, session_id: &str) -> Vec<ApprovalTicket> {
-        let tickets = self.tickets.read();
-        tickets
-            .values()
-            .filter(|t| t.session_id == session_id && !t.is_expired())
-            .cloned()
-            .collect()
-    }
-
-    fn ticket_id(ticket: &ApprovalTicket) -> String {
-        use sha2::Digest;
-        let mut hasher = Sha256::new();
-        hasher.update(ticket.session_id.as_bytes());
-        hasher.update(ticket.action_id.as_bytes());
-        hasher.update(ticket.issued_at.timestamp().to_le_bytes());
-        format!("{:x}", hasher.finalize())[..16].to_string()
-    }
-}
+    pub async fn process_submission(&self, payload: &str) -> Result<AlchemySubmission> {
+        // In a real scenario with
