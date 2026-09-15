@@ -6,9 +6,9 @@ import { Request } from 'express'; // Assuming Express is available or imported 
  * Core Submission Type Definition
  */
 interface AlchemySubmission {
-  id: string; // Unique identifier for tracking processing status
-  contentId?: string; // ID of uploaded file (if any)
-  metadata: Record<string, unknown>; // Optional custom metadata from LLM response or user input
+  id?: string; // Unique identifier for tracking processing status (nullable in Rust/C# semantics)
+  contentId: string | null; // ID of uploaded file (if any), nullable to mimic struct mapping flexibility
+  metadata?: Record<string, unknown>; // Optional custom metadata from LLM response or user input
 }
 
 /**
