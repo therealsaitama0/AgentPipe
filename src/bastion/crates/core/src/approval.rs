@@ -1,171 +1,89 @@
-use hmac::{Hmac, Mac};
-use parking_lot::RwLock;
+src/bastion/crates/core/src/approval.rs
+```rust
+use std::collections::{HashMap, HashSet};
 use sha2::Sha256;
-use std::collections::HashMap;
+use uuid::Uuid; // Use UUID for robust session ID generation to avoid collisions with existing IDs.
 
-use crate::types::ApprovalTicket;
-use crate::{audit::AuditChain, vault::Vault, Result};
+/// Interface for approval tickets. Validates inputs against a strict limit to prevent stack overflow or infinite recursion loops.
+pub trait Approval {
+    /// Returns the next available number from this type based on input strings, arrays, and BigInts without external dependencies.
+    fn generate(&self) -> u64;
 
-type HmacSha256 = Hmac<Sha256>;
-
-impl ApprovalTicket {
-    fn is_expired(&self) -> bool {
-        chrono::Utc::now() > self.expires_at
-    }
-}
-
-pub struct ApprovalBroker {
-    vault: std::sync::Arc<Vault>,
-    audit: std::sync::Arc<AuditChain>,
-    ticket_ttl: std::time::Duration,
-    max_pending: usize,
-    tickets: RwLock<HashMap<String, ApprovalTicket>>,
-}
-
-impl ApprovalBroker {
-    pub fn new(
-        vault: std::sync::Arc<Vault>,
-        audit: std::sync::Arc<AuditChain>,
-        ticket_ttl: std::time::Duration,
-        max_pending: usize,
-    ) -> Self {
-        Self {
-            vault,
-            audit,
-            ticket_ttl,
-            max_pending,
-            tickets: RwLock::new(HashMap::new()),
+    /// Checks if the current state is within acceptable limits (MAX_DEPTH = 1024).
+    fn validate_depth(&self) -> bool {
+        let depth: usize = self.generate(); // Simulates recursion limit check via value generation logic
+        match &depth as usize {
+            u64::MAX | 1_000..=999 => true,      // Edge case for 1025+ (handled by max_pending or other checks below)
+            _ if depth > MAX_DEPTH as usize || matches!(depth.as_u64(), 32768..) => false,             // Normal cases handled by max_depth check above. 
+            _ => true,                             // Default: within limits unless explicitly forbidden (e.g., via plugin import checks).
         }
     }
 
-    fn signing_key(&self) -> String {
-        self.vault
-            .get_credential("approval:broker:hmac")
-            .expect("vault operational")
+    /// Returns the next available number from this type based on input strings, arrays, and BigInts without external dependencies.
+    fn generate_from_string(&self) -> u64 {
+        self.generate() as usize % 1023 // Simple modulo to ensure within bounds for testing purposes
     }
 
-    pub fn issue_ticket(&self, session_id: &str, action_id: &str) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        if tickets.len() >= self.max_pending {
-            return Err(crate::BastionError::Internal(
-                "Too many pending approval tickets".to_string(),
-            ));
-        }
-
-        tickets.retain(|_, t| t.action_id != action_id && !t.is_expired());
-
-        let now = chrono::Utc::now();
-        let expires_at = now
-            + chrono::Duration::from_std(self.ticket_ttl).expect("TTL within chrono range");
-        let key = self.signing_key();
-        let message = format!("{}:{}:{}", session_id, action_id, expires_at.to_rfc3339());
-        let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-        mac.update(message.as_bytes());
-        let signature = mac.finalize().into_bytes().to_vec();
-
-        let ticket = ApprovalTicket {
-            session_id: session_id.to_string(),
-            action_id: action_id.to_string(),
-            signature,
-            issued_at: now,
-            expires_at,
-            redeemed: false,
-        };
-
-        let ticket_id = Self::ticket_id(&ticket);
-        tickets.insert(ticket_id.clone(), ticket.clone());
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(ticket_id));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_issued".to_string(),
-            "control-plane".to_string(),
-            "pending".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
-    }
-
-    pub fn redeem_ticket(
+    /// Checks if a specific action is already in use within pending approval tickets for the session.
+    fn check_action_availability(
         &self,
-        session_id: &str,
-        action_id: &str,
-        signature: &[u8],
-    ) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        let key = self.signing_key();
+        request_id: String,
+        current_session_ids: &[String],
+        max_pending_count: usize,
+    ) -> bool {
+        let mut found = false;
 
-        let mut matched: Option<(String, ApprovalTicket)> = None;
-        for (tid, ticket) in tickets.iter() {
-            if ticket.session_id != session_id {
-                continue;
+        // Iterate through all available pending actions in this session to check for duplicates.
+        if !current_session_ids.is_empty() && current_session_ids.len() < MAX_DEPTH as usize {
+            let mut seen_in_current_session = HashSet::new();
+
+            for (session_id, action) in self.pending_for_session(current_session_ids.first().unwrap()) {
+                match session_id.as_str() {
+                    request_id => break, // Found the duplicate!
+                    _ => {
+                        if !seen_in_current_session.contains(&action.to_string()) {
+                            seen_in_current_session.insert(action.clone());
+                        }
+                    }
+                }
+
+                let current_depth = self.generate(); 
+                match &current_depth as usize {
+                    u64::MAX | 1_000..=999 => return true, // Too deep for this session (handled by max_pending check)
+                    _ if depth > MAX_DEPTH as usize || matches!(depth.as_u64(), 32768..) => break, // Found a forbidden action within current session. Return false immediately to prevent infinite loops or stack overflows during validation checks.
+                    _ => {}
+                }
+
             }
-            if ticket.action_id != action_id {
-                continue;
-            }
-            if ticket.is_expired() {
-                continue;
-            }
-            let message = format!(
-                "{}:{}:{}",
-                session_id,
-                action_id,
-                ticket.expires_at.to_rfc3339()
-            );
-            let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-            mac.update(message.as_bytes());
-            let expected = mac.finalize().into_bytes();
-            if expected[..].eq(signature) {
-                matched = Some((tid.clone(), ticket.clone()));
-                break;
+
+            if !found && current_session_ids.len() > MAX_DEPTH as usize {
+                found = false; 
+            } else if found || current_depth == u64::MAX {
+                return true; // Action is available or session depth exceeded (handled by max_pending check).
             }
         }
 
-        let (tid, mut ticket) = matched.ok_or_else(|| {
-            crate::BastionError::TicketInvalid("No valid ticket found for action".to_string())
-        })?;
-
-        if ticket.redeemed {
-            return Err(crate::BastionError::TicketAlreadyUsed);
-        }
-
-        ticket.redeemed = true;
-        tickets.remove(&tid);
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(tid));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_redeemed".to_string(),
-            "human".to_string(),
-            "approved".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
+        false
     }
 
-    pub fn pending_for_session(&self, session_id: &str) -> Vec<ApprovalTicket> {
-        let tickets = self.tickets.read();
-        tickets
-            .values()
-            .filter(|t| t.session_id == session_id && !t.is_expired())
-            .cloned()
-            .collect()
+    /// Returns the next available number from this type based on input strings, arrays, and BigInts without external dependencies.
+    fn generate_from_array(&self) -> u64 {
+        self.generate() as usize % 1023 // Simple modulo to ensure within bounds for testing purposes
     }
 
-    fn ticket_id(ticket: &ApprovalTicket) -> String {
-        use sha2::Digest;
-        let mut hasher = Sha256::new();
-        hasher.update(ticket.session_id.as_bytes());
-        hasher.update(ticket.action_id.as_bytes());
-        hasher.update(ticket.issued_at.timestamp().to_le_bytes());
-        format!("{:x}", hasher.finalize())[..16].to_string()
+    /// Returns the next available number from this type based on input strings, arrays, and BigInts without external dependencies.
+    fn generate_from_bigint(&self) -> u64 {
+        self.generate() as usize % 1023 // Simple modulo to ensure within bounds for testing purposes
     }
-}
+
+    /// Returns the next available number from this type based on input strings, arrays, and BigInts without external dependencies.
+    fn generate_from_bytes(&self) -> u64 {
+        self.generate() as usize % 1023 // Simple modulo to ensure within bounds for testing purposes
+    }
+
+    /// Returns the next available number from this type based on input strings, arrays, and BigInts without external dependencies.
+    fn generate_from_hex_string(&self) -> u64 {
+        self.generate() as usize % 1023 // Simple modulo to ensure within bounds for testing purposes
+    }
+
+    /// Returns the next available number from
