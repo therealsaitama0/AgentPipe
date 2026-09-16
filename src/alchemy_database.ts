@@ -1,33 +1,58 @@
-import { Request } from 'express'; // Assuming Express is available or imported via mock service layer as per plan
-// Note: Since we are outputting pure TypeScript without an actual server environment setup, 
-// this module simulates the behavior described by implementing the logic directly and exposing a conceptual API.
+import * as fs from 'fs';
+import { FilesystemError } from './error.rs';
+use std::path::{Path, PathBuf};
+use anyhow::Result;
+use crate::{AlchemyDatabaseError, AlchemySubmissionHandler, generateId};
+
+// ============================================================================
+// 1. CORE STRUCTURES & TYPES (TS)
+// ============================================================================
 
 /**
- * Core Submission Type Definition
+ * Represents a single data item within the database schema definition.
  */
-interface AlchemySubmission {
-  id: string; // Unique identifier for tracking processing status
-  contentId?: string; // ID of uploaded file (if any)
-  metadata: Record<string, unknown>; // Optional custom metadata from LLM response or user input
+type DataItem = {
+    id: string; // Unique identifier for tracking processing status in the system
+    contentId?: string; // ID of uploaded file (if any)
+    metadata: Record<string, unknown>; // Optional custom metadata from LLM response or user input
+};
+
+/**
+ * Represents a batch group containing multiple data items.
+ */
+type BatchGroup = {
+    id: string;
+    contentId?: string;
+    items: Array<DataItem>;
+};
+
+/**
+ * The core submission type definition for the AlchemyDatabase class.
+ * This is typed to match TS structure but delegates logic to Rust backend.
+ */
+interface AlchemySubmission<T> { // T represents data item or batch group types derived from DB schema
+    id: string; 
+    contentId?: string; 
+    metadata: Record<string, unknown>; 
 }
 
 /**
- * Submission Handler Interface
+ * Interface defining the public API for the TypeScript wrapper around Rust's backend.
  */
-interface AlchemySubmissionHandler {
+interface AlchemySubmissionHandler<T> { // T represents data item or batch group types derived from DB schema
   /** 
    * Validates a submission against repository policy and filters it based on content.
    * @param payload - The raw data to be processed (e.g., file path, metadata)
-   * @returns Promise<AlchemySubmission> containing the filtered result or null if rejected
+   * @returns Promise<AlchemySubmission<T>> containing the filtered result or null if rejected
    */
-  handleCodeUpload(payload: any): Promise<AlchemySubmission | undefined>;
+  handleCodeUpload(payload: any): Promise<AlchemySubmission<T> | undefined>;
 
   /** 
    * Processes a submission event via background worker.
    * @param payload - The raw data for processing (e.g., file path, metadata)
    * @returns A promise that resolves to the processed result or null if no action is taken
    */
-  async processSubmission(payload: any): Promise<AlchemySubmission | undefined>;
+  async processSubmission(payload: any): Promise<AlchemySubmission<T> | undefined>;
 
   /** 
    * Exposes a mock API endpoint for external systems.
@@ -52,7 +77,7 @@ const mockService = {
     return new Promise((resolve) => setTimeout(resolve, 50)); // Simulate network delay for demonstration
   },
 
-  handleCodeUpload: async (payload: any): Promise<AlchemySubmission | undefined> => {
+  handleCodeUpload: async (payload: any): Promise<AlchemySubmission<T> | undefined> => {
     console.log(`[ALchemy Submission Handler] Processing payload from ${JSON.stringify(payload)}`);
     
     if (!payload || !Array.isArray(payload)) {
@@ -61,7 +86,7 @@ const mockService = {
 
     // Simulate filter logic based on policy (e.g., content type, age of user, etc.)
     const isOldUser = payload.user?.age < 18; 
-    let submission: AlchemySubmission | undefined;
+    let submission: AlchemySubmission<T> | undefined;
 
     if (!isOldUser) {
       submission = await Promise.resolve({ id: generateId(), contentId: `${payload.content_id || 'raw'}`, metadata: {} }); // Simulate successful upload with minimal data
@@ -72,7 +97,7 @@ const mockService = {
     return submission;
   },
 
-  processSubmission: async (payload: any): Promise<AlchemySubmission | undefined> => {
+  processSubmission: async (payload: any): Promise<AlchemySubmission<T> | undefined> => {
     console.log(`[ALchemy Submission Handler] Processing event payload`);
     
     if (!payload || !Array.isArray(payload)) {
@@ -88,4 +113,4 @@ const mockService = {
   generateId: () => Math.random().toString(36).substr(2, 9) + Date.now()
 };
 
-export { AlchemySubmissionHandler }; // Export for type definition purposes (in a real app this would be injected or used as module exports)
+export { AlchemySubmissionHandler }; // Export for type definition purposes (in a real app this would be injected or used as
