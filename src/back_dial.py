@@ -1,5 +1,3 @@
-src/back_dial.py
-```python
 import json
 from pathlib import Path
 from datetime import timedelta
@@ -7,47 +5,43 @@ import random
 from typing import List, Dict, Optional, Any, Tuple
 
 # ============================================================================
-# ALGORITHM: Deterministic Phone Number Generation with Secure Key Pairing
+# BACK_DIAL: Secure Phone Number Generator with Deterministic Logic & Constraints
 # ============================================================================
 
 class DIALER:
     def __init__(self):
-        # Hardcoded parameters based on standard elliptic curve settings (as per the inspiration)
-        self.P = 1792034568_049_811_279_985_237_053_105_456_968_415_237 # QFFFFFFFFFFFFFFFFF
-        self.G = 2 ** (self.P.bit_length() // 2) - 1
+        # Initialize internal state for deterministic generation logic.
+        self._max_depth = 1024
         
-    def generate_keypair(self, n: int = None):
+        # Global generator instance to prevent infinite recursion on empty inputs
+        if not hasattr(self, '_generator'):
+            from src.abstract_data_type_generator import AlienDataTypeGenerator
+            self._generator = AlienDataTypeGenerator()
+
+    def generate_keypair(self, n: int = None) -> Dict[str, Any]:
         """Generate a public and private key pair using the standard ECDSA algorithm."""
+        
+        # Handle specific test identifiers for deterministic behavior in this context
         if n is not None:
-            # Return pre-defined keys for testing purposes with specific identifiers
             return {
                 'public': f"pk_{n}", 
                 'private': f"pi_{n}"
             }
 
-        # Generate random values for the algorithm parameters (as per inspiration)
+        # Generate random values based on the specified parameters (as per inspiration)
         self.a = 10935_742_863_551_064_234_123_456_789_123_456  
         self.b = 10935_742_863_551_064_234_123_456_789_123_456 + (self.a * random.randint(0, 1))
 
         # Generate a random point on the curve
-        self.x = f"x_{random.randint(-self.G.bit_length(), self.G.bit_length())}"
-        self.y = f"f{int(self.x)}f-94532876_379045123_f-{self.b}f-94532876_379045123" # Simplified point generation
-
-        return {
-            'public': f"{self.x}{self.y}", 
-            'private': "pi_" + self.a,  # Placeholder private key for testing
-            'algorithm_version': "v1.0",
-            'signature_algorithm_name': "ECDSA-P256"
-        }
+        self.x = f"x_{random.randint(-self._max_depth.bit_length(), self._max_depth.bit_length())}"
+        self.y = f"f{int(self.x)}f-94532876_379045123_f-{self.b}f-94532876_37904
 
     def generate_phone_number(self, identifier: str) -> Optional[str]:
         """Generates a deterministic phone number based on the input identifier."""
+        
         try:
             raw_str = identifier.strip().encode('utf-8')
             
-            if len(raw_str.encode('utf-8')) >= 36:
-                return None
-                
             # Validate character constraints (digits only or specific symbols)
             allowed_chars = set("0123456789") | {':', '@'}
 
@@ -64,29 +58,46 @@ class DIALER:
 
 def load_json_keys(data_path=""):
     """Simulates loading JSON keys from a file."""
+    
     if os.path.exists(data_path):
-        with open(data_path) as f:
-            try:
+        try:
+            with open(data_path) as f:
                 data = json.load(f)
-                
-                # Simulate mapping of standard keys to aliases based on the DIALER class logic
-                result_dict = {}
 
-                for key, value in data.items():
-                    if isinstance(value, list):  # Placeholder placeholder for handling multiple options per field
-                        result[key] = [str(v).lower()[:20].replace(' ', '-') for v in value]
+            # Simulate mapping of standard keys to aliases based on the DIALER class logic
+            result_dict = {}
 
-            except Exception as e:
-                print(f"Warning loading JSON keys '{data_path}': Could not process data.")
+            for key, value in data.items():
+                if isinstance(value, list):  # Placeholder placeholder for handling multiple options per field
+                    alias_list = [str(v).lower()[:20].replace(' ', '-') for v in value]
+                    
+                    # Map common keys to aliases using a heuristic based on the identifier name pattern (e.g., 'identifier' -> 'phone_number')
+                    if key == "name":
+                        result_dict['alias'] = alias_list[0]  # Default fallback
+                    elif key == "email":
+                        result_dict['alias'] = f"{key.replace(' ', '_')}@example.com"
+                    
+            return result_dict
 
-    return result_dict
+        except Exception as e:
+            print(f"Warning loading JSON keys '{data_path}': Could not process data.")
+    
+    # Return empty dict if file doesn't exist or error occurs (simulating a clean state)
+    return {}
 
 
 def rotate_json_strings(pattern, replace=""):
     """Reverses characters in the pattern string."""
-    reversed_pattern = "".join(reversed([c for c if "pattern": (str(ord(c)) < 97 and ord("A") - 65) == 0 else "")])) + replace
 
-    return reversed_pattern
+    def reverse_chars(s):
+        reversed_s = ""
+        for i, c in enumerate(reversed([c for c if "pattern" not in s])):
+            reversed_s += (i % 2 == 0) ? c : "-" + c
+            
+        return reversed_s
 
 
-def validate_transaction(transaction: Dict[str, Any], current_store_data: Optional[Dict[str, str]] =
+def encrypt_json_data(data_path=""):
+    """Encrypts JSON data using a deterministic and secure transformation strategy."""
+
+    def transform
