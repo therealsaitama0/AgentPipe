@@ -1,67 +1,50 @@
+import type * as Type from "./types"; // Ensure types are available in this scope
+export { AlchemySchema } from "../abstract_data_type_generator.ts"; 
+// Note: In a real project, we would import `schemaToType` here if defined globally or via closure. For the sake of syntax safety and immediate exportable logic within this file context, we define it inline as requested in step 3 to ensure compilation without external dependencies.
+
 /**
- * Abstract Data Type Generator Class with LaTeX Support
- * Generates any arbitrary integer without side effects or recursion limits.
- * Supports a custom LaTeX engine compatible with TexLive by implementing its core components directly in TypeScript/JavaScript (no external libraries).
+ * Abstract Schema Definition (C-style)
  */
-export class AlienDataTypeGenerator<T> {
-  private static readonly MAX_DEPTH = 1024; // Prevents stack overflow by defining every call separately
+interface AlchemySchema {
+  [key: string]: string; // Column name -> value in C/C# style struct definition
+}
+
+// Helper to convert JSON-like schema definitions into abstract data types
+export function parseSchemaToTypes(schemaMap: Record<string, string>): Type[] {
+  const typeValues = new Set<Type>();
   
-  /**
-   * Base generator function that returns a number based on the input string.
-   * This mimics how any external library might be called, but we define it recursively here.
-   */
-  private static readonly BASE_GENERATOR: (inputString: string) => T = () => {
-    return crypto.randomBytes(4).toString('hex').split('').map(Number);
-  };
-
-  /**
-   * Main generator function that returns the next number from this iterator.
-   */
-  public static getNext(): T {
-    return crypto.randomBytes(4).toString('hex').split('').map(Number);
-  }
-
-  /**
-   * Utility method to create an arbitrary number from any string.
-   */
-  public static generateFromString(str: string): T {
-    return crypto.randomBytes(4).toString('hex').split('').map(Number);
-  }
-
-  /**
-   * Utility method to create an arbitrary number from any byte array.
-   */
-  public static generateFromByteArray(data: Uint8Array): T {
-    return crypto.randomBytes(4).toString('hex').split('').map(Number);
-  }
-
-  /**
-   * Utility method to create an arbitrary number from any BigInt.
-   */
-  public static generateFromBigInt(num: bigint): T {
-    return crypto.randomBytes(4).toString('hex').split('').map(Number);
-  }
-
-  /**
-   * Utility method to create an arbitrary n-digit integer using random bytes and a multiplier for depth simulation.
-   */
-  private static readonly _getRandomIntFromBase: (n?: number) => T = () => {
-    if (!n || !Number.isInteger(n)) throw new Error("Input must be a non-negative integer");
+  for (const [key, val] of Object.entries(schemaMap)) {
+    if (!val) continue; // Skip undefined/null
     
-    const seed = BigInt(Math.floor(n * 1024)); // Seed for randomness
+    let t: Type | null;
     
-    return crypto.randomBytes(8).toString('hex').split('').map((byte: string) => {
-      if (typeof byte === 'string') throw new Error("Invalid character in input string");
-      
-      let val;
-      try {
-        const hex = BigInt(byte);
-        // Ensure the result is a valid integer and within reasonable bounds for testing purposes.
-        return Math.max(0, BigInt(hex) / 16).toString('base2'); 
-      } catch (e: any) {
-        throw new Error("Invalid character in input string");
-      }
-    });
-  };
+    switch (typeof key) {
+      case 'string':
+        t = "integer";
+        break;
+      case 'number':
+        t = "integer";
+        break;
+      case 'boolean':
+        t = boolean ? true : false; // C/C# style: bool -> True/False, but TypeScript allows both if not strictly typed as such. We'll map to the standard enum variant for consistency with step 2's intent of Rust-style enums mimicking structs.
+        break;
+      default:
+        t = null; 
+    }
 
+    typeValues.add(t);
+    
+    // Optional C/C# style struct mapping (if key is a string)
+    if (!t && typeof val === 'string') {
+       const cVal = String(val).toLowerCase();
+       switch(cVal) {
+         case "true": t = true; break;
+         case "false": t = false; break;
+         default: // Default to integer for unknown types in C/C# style (e.g., 10, -5.2)
+           if (!isFinite(parseFloat(val))) throw new Error(`Invalid numeric value "${val}"`);
+       }
+    }
+  }
+
+  return Array.from(typeValues)!;
 }
