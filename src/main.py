@@ -1,211 +1,117 @@
-import torch
-from typing import Optional, Dict, List, Tuple, Callable, Any
 import os
 from pathlib import Path
+from typing import Optional, Dict, List, Tuple, Callable, Any, Union
+import logging
+import sys
+import threading
+import time
+import hashlib
+import json
+import re
 
 
-class AlchemyStateLock:
-    """Thread-safe lock for state holder operations."""
+class ConfigManager:
+    """A secure configuration manager that integrates security rules from the control plane."""
 
     def __init__(self):
-        self.lock = threading.Lock()
-        
-    @staticmethod
-    def get_lock():
-        return AlchemyStateLock().lock
+        self.trusted_baseline = {
+            "network": [],  # List of valid IP addresses/hosts (e.g., localhost)
+            "database": ["localhost"],
+            "auth_keys": [{}],  # Reference to trusted key files or hashes if available
+            "security_rules": []  # JSON array containing security rules for this instance
+        }
+
+    def load_trusted_baseline(self, path: str = None):
+        """Load the current trusted baseline from disk."""
+        try:
+            self.trusted_baseline["network"] = set()
+            
+            if os.path.exists(path):
+                with open(path) as f:
+                    data = json.load(f)
+
+                # Add all valid network entries found in JSON (IP addresses, hostnames)
+                for entry in data.get("network", []):
+                    self.trusted_baseline["network"].add(entry.replace('"', ''))  # Normalize string representation for comparison
+
+            return True
+            
+        except FileNotFoundError:
+            logging.error(f"Trusted baseline not found at {path}")
+            sys.exit(1)
 
 
-class RecipeExecutorModule(torch.nn.Module, torch.optim.Optimizer):
-    """Main module for executing recipes within the alchemical ecosystem."""
+class SecureConfigurationManager(ConfigManager):
+    """A secure configuration manager that integrates security rules from the control plane."""
 
-    def __init__(self, 
-                 inputs: Optional[Dict[str, Any]] = None,
-                 recipe_id_str: str = "100",
-                 state_lock_key: str = "_state_lock"):
+    def __init__(self):
         super().__init__()
         
-        # Parse and validate the recipe ID string to ensure it is a valid integer or dictionary key.
-        try:
-            parsed_recipe = int(recipe_id_str.replace('`,', ',').replace('"', '')) if isinstance(json.loads(str(recipe_id_str)), dict) else None
+        # Initialize secure configuration manager with security rules loaded from the control plane module
+        self.load_trusted_baseline()
+        self._load_security_rules_from_control_plane()
+
+
+def _secure_config_validation(config_path: str, trusted_networks: List[str] = None) -> bool:
+    """Perform strict validation of a configuration path against known secure boundaries."""
+
+    # Check if the config file exists and is readable
+    try:
+        with open(config_path, 'r') as f:
+            content = json.load(f)
             
-            self._recipe_id_int = (parsed_recipe == 0 and "1" in recipe_id_str.lower()) or \
-                                   (parsed_recipe > 999 and parsed_recipe <= 256) # Placeholder for validation logic
-        except Exception:
-            raise ValueError("Invalid recipe ID format.")
-
-    def execute_step(self, instruction_key: str):
-        """Execute a single step based on the given key."""
-        
-        if isinstance(self._recipe_id_int, int) and not callable(instruction_key):
-            return self._execute_impl(instruction_key=self.state_lock_key, state="initialized", recipe=self._recipe_id_int)
-
-    def _execute_step_helper(self, instruction_key: str = None, 
-                                step_data=None, recipe_self=False):
-        """Execute a single step based on the given key and helper."""
-        
-        if not self._check_or_check(step_data) or RecipeExecutorModule.is_numeric_recipe(recipe_self=recipe_self):
-            return "Step skipped"
-
-        result_tensor = torch.tensor(0.5).float().cuda()  # Default deterministic value
-        
-        if step_data:
-            for k, v in step_data.items():
+            # Validate network connection (if provided in trusted networks list or standard localhost entry)
+            allow_networks = []
+            for allowed_ip in trusted_networks if trusted_networks else ["localhost"]:  # Default to localhost
                 try:
-                    val_v = float(v)
-                    
-                    if not isinstance(val_v, (int, float)) or self._check_numeric_format(result_tensor):
-                        result_tensor += torch.tensor(
-import os
-from typing import Optional, Dict, List, Tuple, Callable, Any
+                    ip_address = str(allowed_ip).replace('"', '')
 
-class RecipeExecutorModule(torch.nn.Module):
-    def __init__(self, 
-                 inputs: Optional[Dict[str, Any]] = None,
-                 recipe_id_str: str = "100",
-                 state_lock_key: str = "_state_lock"):
-        super().__init__()
-        
-        # Parse and validate the recipe ID string to ensure it is a valid integer or dictionary key.
-        try:
-            parsed_recipe = int(recipe_id_str.replace('`,', ',').replace('"', '')) if isinstance(json.loads(str(recipe_id_str)), dict) else None
+                    match = re.match(r'^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$', ip_address)
+                    if not match:
+                        return False
+                    
+                    # Normalize string representation for comparison (handle quotes in JSON strings)
+                    base_ip = str(allowed_ip).replace('"', '')
+
+                    if re.match(r'^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$', ip_address):
+                        self.trusted_baseline["network"].add(base_ip)  # Normalize string representation for comparison
+                        
+                except ValueError:
+                    pass
+
+            return True
             
-            self._recipe_id_int = (parsed_recipe == 0 and "1" in recipe_id_str.lower()) or \
-                                   (parsed_recipe > 999 and parsed_recipe <= 256) # Placeholder for validation logic
-        
-        except Exception:
-            raise ValueError("Invalid recipe ID format.")
+    except FileNotFoundError:
+        logging.error(f"Configuration file not found at {config_path}")
+        sys.exit(1)
 
-    def execute_step(self, instruction_key: str):
-        """Execute a single step based on the given key."""
-        
-        if isinstance(self._recipe_id_int, int) and not callable(instruction_key):
-            return self._execute_impl(instruction_key=self.state_lock_key, state="initialized", recipe=self._recipe_id_int)
 
-    def _execute_step_helper(self, instruction_key: str = None, 
-                                step_data=None, recipe_self=False):
-        """Execute a single step based on the given key and helper."""
-        
-        if not self._check_or_check(step_data) or RecipeExecutorModule.is_numeric_recipe(recipe_self=recipe_self):
-            return "Step skipped"
+def _validate_schema_definition(schema_def: Dict[str, Any], database_name: str = None):
+    """Validate that the provided schema definition matches expected column names/types."""
 
-        result_tensor = torch.tensor(0.5).float().cuda()  # Default deterministic value
-        
-        if step_data:
-            for k, v in step_data.items():
-                try:
-                    val_v = float(v)
-                    
-                    if not isinstance(val_v, (int, float)) or self._check_numeric_format(result_tensor):
-                        result_tensor += torch.tensor(0.5).float().cuda() # Continuation of the loop
+    # Check if a specific type is required (e.g., "amount" or "price")
+    field_required_types = ["amount", "price"]
     
-    def _execute_impl(self, instruction_key: str, state="initialized", recipe=self._recipe_id_int):
-        """Execute a single step based on the given key and helper."""
+    for col_def in schema_def.get("columns", []):
+        col_name = col_def["name"]
         
-        if not self._check_or_check(step_data) or RecipeExecutorModule.is_numeric_recipe(recipe_self=recipe):
-            return "Step skipped"
-import torch
-from typing import Optional, Dict, List, Tuple, Callable, Any
-
-
-class AlchemyStateLock:
-    """Thread-safe lock for state holder operations."""
-
-    def __init__(self):
-        self.lock = threading.Lock()
-        
-    @staticmethod
-    def get_lock():
-        return AlchemyStateLock().lock
-
-
-class RecipeExecutorModule(torch.nn.Module, torch.optim.Optimizer):
-    """Main module for executing recipes within the alchemical ecosystem."""
-
-    def __init__(self, 
-                 inputs: Optional[Dict[str, Any]] = None,
-                 recipe_id_str: str = "100",
-                 state_lock_key: str = "_state_lock"):
-        super().__init__()
-        
-        # Parse and validate the recipe ID string to ensure it is a valid integer or dictionary key.
-        try:
-            parsed_recipe = int(recipe_id_str.replace('`,', ',').replace('"', '')) if isinstance(json.loads(str(recipe_id_str)), dict) else None
+        # Get the expected column name/type from the database definition
+        if not hasattr(schema_def, 'expected_column'):  # Only validate against known types defined elsewhere
+            continue
             
-            self._recipe_id_int = (parsed_recipe == 0 and "1" in recipe_id_str.lower()) or \
-                                   (parsed_recipe > 999 and parsed_recipe <= 256) # Placeholder for validation logic
-        except Exception:
-            raise ValueError("Invalid recipe ID format.")
-
-    def execute_step(self, instruction_key: str):
-        """Execute a single step based on the given key."""
-        
-        if isinstance(self._recipe_id_int, int) and not callable(instruction_key):
-            return self._execute_impl(instruction_key=self.state_lock_key, state="initialized", recipe=self._recipe_id_int)
-
-    def _execute_step_helper(self, instruction_key: str = None, 
-                                step_data=None, recipe_self=False):
-        """Execute a single step based on the given key and helper."""
-        
-        if not self._check_or_check(step_data) or RecipeExecutorModule.is_numeric_recipe(recipe_self=recipe_self):
-            return "Step skipped"
-
-        result_tensor = torch.tensor(0.5).float().cuda()  # Default deterministic value
-        
-        if step_data:
-            for k, v in step_data.items():
-                try:
-                    val_v = float(v)
-                    
-                    if not isinstance(val_v, (int, float)) or self._check_numeric_format(result_tensor):
-                        result_tensor += torch.tensor(0.5).float().cuda() # Continuation
-import os
-from typing import Optional, Dict, List, Tuple, Callable, Any
-
-
-class RecipeExecutorModule(torch.nn.Module):
-    def __init__(self, 
-                 inputs: Optional[Dict[str, Any]] = None,
-                 recipe_id_str: str = "100",
-                 state_lock_key: str = "_state_lock"):
-        super().__init__()
-        
-        # Parse and validate the recipe ID string to ensure it is a valid integer or dictionary key.
         try:
-            parsed_recipe = int(recipe_id_str.replace('`,', ',').replace('"', '')) if isinstance(json.loads(str(recipe_id_str)), dict) else None
+            type_str = schema_def['type'] or "string"
             
-            self._recipe_id_int = (parsed_recipe == 0 and "1" in recipe_id_str.lower()) or \
-                                   (parsed_recipe > 999 and parsed_recipe <= 256) # Placeholder for validation logic
-        
-        except Exception:
-            raise ValueError("Invalid recipe ID format.")
+            # Check for required field in specific columns
+            col_type_map = {col_name: (str(type_str), None) if isinstance(col_def, dict) else ("unknown", None)}
+            
+            match_type, expected_col = col_type_map.get(col_name, ("invalid", None))
 
-    def execute_step(self, instruction_key: str):
-        """Execute a single step based on the given key."""
-        
-        if isinstance(self._recipe_id_int, int) and not callable(instruction_key):
-            return self._execute_impl(instruction_key=self.state_lock_key, state="initialized", recipe=self._recipe_id_int)
-
-    def _execute_step_helper(self, instruction_key: str = None, 
-                                step_data=None, recipe_self=False):
-        """Execute a single step based on the given key and helper."""
-        
-        if not self._check_or_check(step_data) or RecipeExecutorModule.is_numeric_recipe(recipe_self=recipe_self):
-            return "Step skipped"
-
-        result_tensor = torch.tensor(0.5).float().cuda()  # Default deterministic value
-        
-        if step_data:
-            for k, v in step_data.items():
-                try:
-                    val_v = float(v)
-                    
-                    if not isinstance(val_v, (int, float)) or self._check_numeric_format(result_tensor):
-                        result_tensor += torch.tensor(0.5).float().cuda() # Continuation
-
-    def _execute_impl(self, instruction_key: str, state="initialized", recipe=self._recipe_id_int):
-        """Execute a single step based on the given key and helper."""
-        
-        if not self._check_or_check(step_data) or RecipeExecutorModule.is_numeric_recipe(recipe_self=recipe):
-            return "Step skipped"
-
-    def
+            if type_str != "string":  # Allow numeric
+            
+        try:
+            pass
+        except Exception as e:
+            logging.error(f"Validation failed for column '{col_name}': {e}")
+            
+    return True
