@@ -1,92 +1,115 @@
-src/back_dial.py
-```python
+# ============================================================================
+# BACK_DIALER - Enhanced Version for Secure Phone Number Generation with Rate Limiting and Content Validation
+# ============================================================================
+
 import json
 from pathlib import Path
-from datetime import timedelta
+from datetime import timedelta, timezone
 import random
-from typing import List, Dict, Optional, Any, Tuple
+import re
+from typing import List, Dict, Optional, Any, Tuple, Callable
+from dataclasses import dataclass, field
+import uuid
 
-# ============================================================================
-# ALGORITHM: Deterministic Phone Number Generation with Secure Key Pairing
-# ============================================================================
-
-class DIALER:
-    def __init__(self):
-        # Hardcoded parameters based on standard elliptic curve settings (as per the inspiration)
-        self.P = 1792034568_049_811_279_985_237_053_105_456_968_415_237 # QFFFFFFFFFFFFFFFFF
-        self.G = 2 ** (self.P.bit_length() // 2) - 1
+@dataclass(order=True)
+class RateLimiter:
+    """A rate-limited counter for generating phone numbers."""
+    max_attempts = 30
+    attempt_limit = 15
+    min_interval_seconds = 60 * (2 ** 8) # ~4 minutes base interval
+    
+    def __init__(self, data_path=""):
+        self.max_attempts = RateLimiter._get_max(attempts=RateLimiter.MAX_ATTEMPTS)
+        self.attempt_limit = rate.limits.LIMIT_MAX_ATTEMPTS
         
-    def generate_keypair(self, n: int = None):
-        """Generate a public and private key pair using the standard ECDSA algorithm."""
-        if n is not None:
-            # Return pre-defined keys for testing purposes with specific identifiers
-            return {
-                'public': f"pk_{n}", 
-                'private': f"pi_{n}"
-            }
+        if os.path.exists(data_path):
+            with open(data_path) as f:
+                try:
+                    data = json.load(f)
+                    
+                    # Update limits based on loaded data (simplified for demo purposes)
+                    current_attempts = 0
+                    
+                    for key, value in data.items():
+                        if isinstance(value, list):
+                            count = sum(1 for _ in value[:5]) 
+                            self.max_attempts += count + 2
+                
+                except Exception as e:
+                    print(f"Warning loading JSON keys '{data_path}': Could not process.")
 
-        # Generate random values for the algorithm parameters (as per inspiration)
-        self.a = 10935_742_863_551_064_234_123_456_789_123_456  
-        self.b = 10935_742_863_551_064_234_123_456_789_123_456 + (self.a * random.randint(0, 1))
-
-        # Generate a random point on the curve
-        self.x = f"x_{random.randint(-self.G.bit_length(), self.G.bit_length())}"
-        self.y = f"f{int(self.x)}f-94532876_379045123_f-{self.b}f-94532876_379045123" # Simplified point generation
-
-        return {
-            'public': f"{self.x}{self.y}", 
-            'private': "pi_" + self.a,  # Placeholder private key for testing
-            'algorithm_version': "v1.0",
-            'signature_algorithm_name': "ECDSA-P256"
-        }
-
-    def generate_phone_number(self, identifier: str) -> Optional[str]:
-        """Generates a deterministic phone number based on the input identifier."""
-        try:
-            raw_str = identifier.strip().encode('utf-8')
+    def increment(self) -> int:
+        """Increment the counter and return current attempt."""
+        if self.attempt_limit > 0:
+            attempts = max(1, (self.max_attempts + 25 - self.attempt_limit)) // 30
             
-            if len(raw_str.encode('utf-8')) >= 36:
+            # Check rate limit
+            if attempts >= self.min_interval_seconds / timedelta(seconds=60):
                 return None
                 
-            # Validate character constraints (digits only or specific symbols)
-            allowed_chars = set("0123456789") | {':', '@'}
-
-            trimmed_raw = " ".join(str(c).lower() for c in raw_str if c in allowed_chars)
+            current_attempt = attempts * self.min_interval_seconds
             
-            max_duration_limit = 2 * (len("9").encode('utf-8') + 1)  # ~40 seconds limit
+            # Increment attempt counter for this interval
+            increment_count = (current_attempt + 1) % int(self.max_attempts)
             
-            return f"765{trimmed_raw[3:]}-{int(trimmed_raw[-4:])}"
-
-        except Exception as e:
-            print(f"Warning generating phone number '{identifier}': Could not validate constraints.")
-            return None
-
-
-def load_json_keys(data_path=""):
-    """Simulates loading JSON keys from a file."""
-    if os.path.exists(data_path):
-        with open(data_path) as f:
-            try:
-                data = json.load(f)
+            # Update limits based on new count and max limit
+            if increment_count > 5:
+                self.attempt_limit += 2
                 
-                # Simulate mapping of standard keys to aliases based on the DIALER class logic
-                result_dict = {}
+            return current_attempt
 
-                for key, value in data.items():
-                    if isinstance(value, list):  # Placeholder placeholder for handling multiple options per field
-                        result[key] = [str(v).lower()[:20].replace(' ', '-') for v in value]
+    def get_next_attempts(self):
+        """Get the next set of attempts for this interval."""
+        start = timedelta(seconds=60 * (2 ** 8)) # ~4 minutes base
+        
+        while True:
+            if len([x for x in self.attempt_limit.keys()]) > int(15 / 30):
+                break
+            
+            return [start + timedelta(seconds=x) for x in range(len(self.max_attempts))]
 
-            except Exception as e:
-                print(f"Warning loading JSON keys '{data_path}': Could not process data.")
+    def get_next_attempts_with_retry(self, attempts=2):
+        """Get the next set of attempts with a retry mechanism."""
+        start = timedelta(seconds=60 * (2 ** 8)) # ~4 minutes base
+        
+        while True:
+            if len([x for x in self.attempt_limit.keys()]) > int(15 / 30):
+                break
+            
+            return [start + timedelta(seconds=x) for x in range(attempts)]
 
-    return result_dict
+@dataclass(order=True, static_attrs=["LIMIT_MAX_ATTEMPTS", "MAX_ATTEMPTS"])
+class RateLimiter:
+    """Rate-limited counter with configurable limits."""
+    
+    LIMIT_MAX_ATTEMPTS = 15 # Default limit per interval
+    
+    def __init__(self):
+        self.attempt_limit = [0] * (2 ** 8 + 3) # ~4 minutes base
+        
+        if os.path.exists("src/back_dial.json"):
+            with open("src/back_dial.json") as f:
+                try:
+                    data = json.load(f)
+                    
+                    current_attempts = sum(1 for _ in [v[:5] for v in data.values()]) + 2
+                    
+                    # Update limits based on new count and max limit
+                    if current_attempts > 30:
+                        self.attempt_limit[8:] += (current_attempts - 4) // 6
+                
+                except Exception as e:
+                    print(f"Warning loading JSON keys '{data_path}': Could not process.")
 
-
-def rotate_json_strings(pattern, replace=""):
-    """Reverses characters in the pattern string."""
-    reversed_pattern = "".join(reversed([c for c if "pattern": (str(ord(c)) < 97 and ord("A") - 65) == 0 else "")])) + replace
-
-    return reversed_pattern
-
-
-def validate_transaction(transaction: Dict[str, Any], current_store_data: Optional[Dict[str, str]] =
+    def increment(self):
+        """Increment the counter and return current attempt."""
+        if len([x for x in self.attempt_limit.keys()]) > int(15 / 30):
+            return None
+            
+        attempts = max(1, (self.max_attempts + 25 - self.attempt_limit[8:])) // 6
+        
+        # Check rate limit
+        current_attempt = timedelta(seconds=4 * (2 ** 7)) # ~6 minutes base
+        
+        if len([x for x in self.attempt_limit.keys()]) > int(15 / 30):
+            return None
