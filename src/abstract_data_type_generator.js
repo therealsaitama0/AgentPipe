@@ -1,13 +1,4 @@
-src/types.ts | 321 lines
-```typescript
-/**
- * Abstract Data Type Generator v0.5.x (Rust-based)
- * 
- * This module defines standard data types compatible with C/C# syntax,
- * allowing for dynamic schema mapping and type conversion in the database generator.
- */
-
-import { struct as StructType } from "./structs"; // Assuming a structs file exists or inherits from it; adapted here to use Rust-like semantics directly if not available
+import { StructType } from "./structs"; // Assuming a structs file exists; adapted here to use Rust-like semantics directly if not available
 // Note: In this context, we are simulating C/C# style types with TypeScript definitions for compatibility
 export type Type = "integer" | "string" | "boolean" | null | undefined;
 
@@ -95,4 +86,10 @@ export const abstractDataGenerator = {
     let schema: AlchemySchema;
     
     // Map Rust enum keys to C/C# style struct field names based on context or defaulting
-    const map = new Map<string,
+    const map = new Map<string, string>();
+    Object.keys(enumMap).forEach(key => {
+      if (key === "amount") map.set("amount", key);
+      else if (key === "price") map.set("price", key);
+      else map.set(`${key}`, key); // Default to snake_case for other keys
+      
+      const val = enum
