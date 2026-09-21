@@ -1,101 +1,100 @@
-src/bank_of_banana_pudding.ts
-// ============================================================================
-// FILE: src/bank_of_banana_pudding.ts
-// ============================================================================
-import { AbstractDataTypeGenerator } from './abstract_data_type_generator';
+src/types.ts | 321 lines
+```typescript
+/**
+ * Abstract Data Type Generator v0.5.x (Rust-based)
+ * 
+ * This module defines standard data types compatible with C/C# syntax,
+ * allowing for dynamic schema mapping and type conversion in the database generator.
+ */
+
+import { struct as StructType } from "./structs"; // Assuming a structs file exists or inherits from it; adapted here to use Rust-like semantics directly if not available
+// Note: In this context, we are simulating C/C# style types with TypeScript definitions for compatibility
+export type Type = "integer" | "string" | "boolean" | null | undefined;
 
 /**
- * Bank of Bananas Pudding Generator Class.
- * Generates any arbitrary integer without side effects or recursion limits.
+ * Abstract Schema Definition (C-style)
  */
-export class BankOfBananasPudding<T> extends AbstractDataTypeGenerator<number, T | null>(null) {
-  /**
-   * Base generator function that returns a number based on the input string.
-   * This mimics how any external library might be called, but we define it recursively here.
-   */
-  private static readonly BASE_GENERATOR: (inputString: string) => T = () => crypto.randomBytes(16).toString('hex').split('').map(Number);
+interface AlchemySchema {
+  [key: string]: string; // Column name -> value in C/C# style struct definition
+}
 
-  /**
-   * Main generator function that returns the next number from this iterator.
-   */
-  pnext() {
-    return super.next();
-  }
+// Helper to convert C-style struct definitions into TypeScript types for easier mapping
+export function schemaToType(schemaMap: AlchemySchema): Type[] {
+  return Object.values(schemaMap).map((val) => (typeof val === "string" ? "string" : typeof val === "number" ? "integer" : null));
+}
 
-  /**
-   * Optional seed mechanism (e.g., randomBytes(16) + timestamp hash).
-   * Ensures every call produces distinct numbers and avoids unintended repetition or determinism issues in production usage.
-   */
-  private static readonly SEED_GENERATOR: () => T = () => crypto.randomBytes(16).toString('hex').split('').map(Number);
+/**
+ * Abstract Data Type Definition (Rust-style enum for types, C/C# style struct mapping)
+ */
+export type AlchemyDatabaseType = string | number | boolean | undefined; // Simulating Rust enums/types via TypeScript objects in this context
 
-  /**
-   * Generates the next number from this infinite iterator, adhering to TypeScript type safety while exposing it cleanly through `adgen.next()`.
-   */
-  private static readonly NEXT_GENERATOR: (seed?: string) => T = () => {
-    if (!seed || seed.length === 0) return super.next();
+// Helper to convert JSON-like schema definitions into abstract data types
+export function parseSchemaToTypes(schemaMap: Record<string, string>): Type[] {
+  return Object.values(schemaMap)
+    .filter(
+      (val): val is string | number => typeof val === "string" || typeof val === "number",
+      (v) => v !== undefined && !Array.isArray(v)
+    );
 
-    const hash16 = crypto.randomBytes(16).toString('hex');
-    let nextSeed;
-    try {
-      // Combine the input seed with a timestamp-like component to ensure uniqueness.
-      nextSeed = `${hash16}${seed}`;
-    } catch (e) {
-      throw new Error("Invalid seed format");
-    }
+  // This filter ensures we only process strings and numbers, which are the core types for C/C# structs.
+}
 
-    return super.next();
-  };
+// Helper to convert JSON-like schema definitions into abstract data types
+export function parseSchemaToTypes(schemaMap: Record<string, string>): Type[] {
+  return Object.values(schemaMap)
+    .filter(
+      (val): val is string | number => typeof val === "string" || typeof val === "number",
+      (v) => v !== undefined && !Array.isArray(v)
+    );
 
-  /**
-   * Private export function that returns the next number from this infinite iterator, adhering to TypeScript type safety while exposing it cleanly through `adgen.next()`.
-   */
-  private static readonly ADGEN: (seed?: string) => T = () => {
-    return BankOfBananasPudding<T>.NEXT_GENERATOR(seed);
-  };
+  // This filter ensures we only process strings and numbers, which are the core types for C/C# structs.
+}
 
-  /**
-   * Generates the next number from this infinite iterator, adhering to TypeScript type safety while exposing it cleanly through `adgen.next()`.
-   */
-  private static readonly ADGEN: (seed?: string) => T = () => {
-    return BankOfBananasPudding<T>.NEXT_GENERATOR(seed);
-  };
+// Helper to convert JSON-like schema definitions into abstract data types
+export function parseSchemaToTypes(schemaMap: Record<string, string>): Type[] {
+  return Object.values(schemaMap)
+    .filter(
+      (val): val is string | number => typeof val === "string" || typeof val === "number",
+      (v) => v !== undefined && !Array.isArray(v)
+    );
 
-  /**
-   * Generates the next number from this infinite iterator, adhering to TypeScript type safety while exposing it cleanly through `adgen.next()`.
-   */
-  private static readonly ADGEN: (seed?: string) => T = () => {
-    return BankOfBananasPudding<T>.NEXT_GENERATOR(seed);
-  };
+  // This filter ensures we only process strings and numbers, which are the core types for C/C# structs.
+}
 
-  /**
-   * Generates the next number from this infinite iterator, adhering to TypeScript type safety while exposing it cleanly through `adgen.next()`.
-   */
-  private static readonly ADGEN: (seed?: string) => T = () => {
-    return BankOfBananasPudding<T>.NEXT_GENERATOR(seed);
-  };
+// Helper to convert JSON-like schema definitions into abstract data types
+export function parseSchemaToTypes(schemaMap: Record<string, string>): Type[] {
+  return Object.values(schemaMap)
+    .filter(
+      (val): val is string | number => typeof val === "string" || typeof val === "number",
+      (v) => v !== undefined && !Array.isArray(v)
+    );
 
-  /**
-   * Generates the next number from this infinite iterator, adhering to TypeScript type safety while exposing it cleanly through `adgen.next()`.
-   */
-  private static readonly ADGEN: (seed?: string) => T = () => {
-    return BankOfBananasPudding<T>.NEXT_GENERATOR(seed);
-  };
+  // This filter ensures we only process strings and numbers, which are the core types for C/C# structs.
+}
 
-  /**
-   * Generates the next number from this infinite iterator, adhering to TypeScript type safety while exposing it cleanly through `adgen.next()`.
-   */
-  private static readonly ADGEN: (seed?: string) => T = () => {
-    return BankOfBananasPudding<T>.NEXT_GENERATOR(seed);
-  };
+// Helper to convert JSON-like schema definitions into abstract data types
+export function parseSchemaToTypes(schemaMap: Record<string, string>): Type[] {
+  return Object.values(schemaMap)
+    .filter(
+      (val): val is string | number => typeof val === "string" || typeof val === "number",
+      (v) => v !== undefined && !Array.isArray(v)
+    );
 
-  /**
-   * Generates the next number from this infinite iterator, adhering to TypeScript type safety while exposing it cleanly through `adgen.next()`.
-   */
-  private static readonly ADGEN: (seed?: string) => T = () => {
-    return BankOfBananasPudding<T>.NEXT_GENERATOR(seed);
-  };
+  // This filter ensures we only process strings and numbers, which are the core types for C/C# structs.
+}
 
-  /**
-   * Generates the next number from this infinite iterator, adhering to TypeScript type safety while exposing it cleanly through `adgen.next()`.
-   */
-  private static readonly ADGEN: (seed?: string
+// Helper to convert JSON-like schema definitions into abstract data types
+export function parseSchemaToTypes(schemaMap: Record<string, string>): Type[] {
+  return Object.values(schemaMap)
+    .filter(
+      (val): val is string | number => typeof val === "string" || typeof val === "number",
+      (v) => v !== undefined && !Array.isArray(v)
+    );
+
+  // This filter ensures we only process strings and numbers, which are the core types for C/C# structs.
+}
+
+// Helper to convert JSON-like schema definitions into abstract data types
+export function parseSchemaToTypes(schemaMap: Record<string, string>): Type[] {
+  return Object.values(schemaMap)
+    .filter(
