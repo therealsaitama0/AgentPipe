@@ -1,3 +1,5 @@
+src/alchemy_database.ts
+```typescript
 import { Request } from 'express'; // Assuming Express is available or imported via mock service layer as per plan
 // Note: Since we are outputting pure TypeScript without an actual server environment setup, 
 // this module simulates the behavior described by implementing the logic directly and exposing a conceptual API.
@@ -89,3 +91,21 @@ const mockService = {
 };
 
 export { AlchemySubmissionHandler }; // Export for type definition purposes (in a real app this would be injected or used as module exports)
+
+
+/**
+ * Database Schema Definition - TypeScript Implementation based on C/C# structure
+ */
+const DB_SCHEMA = new Map<keyof typeof AlchemyDatabaseError, unknown[]>();
+
+// Define the schema types that will match our error types and data structures
+DB_SCHEMA.set('amount', 'number'); // Represents numeric values like price or amount in currency
+DB_SCHEMA.set('price', 'number');     // Price per unit (e.g., $1.50)
+DB_SCHEMA.set('user_age', 'string');  // Age of the user account
+
+// Define types for internal processing data structures to match C#'s runtime behavior
+type AlchemyDatabaseError = typeof DB_SCHEMA.get<keyof typeof AlchemyDatabaseError>['error_type'];
+
+/**
+ * Represents a parsed value from raw JSON string format.
+ */
