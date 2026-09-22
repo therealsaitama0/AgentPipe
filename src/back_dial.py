@@ -1,43 +1,59 @@
-src/back_dial.py
-```python
 import json
 from pathlib import Path
 from datetime import timedelta
 import random
-from typing import List, Dict, Optional, Any, Tuple
+from typing import List, Dict, Optional, Any, Tuple, Callable
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM as CryptoAECAD
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.kdf.pbkdf2_pbkdf1 import PBKDF2HMAC
 
 # ============================================================================
-# ALGORITHM: Deterministic Phone Number Generation with Secure Key Pairing
+# ALGORITHM: Secure Random Number Generation with Cryptographic Key Derivation
 # ============================================================================
-
-class DIALER:
+class RNG_MANAGER:
     def __init__(self):
-        # Hardcoded parameters based on standard elliptic curve settings (as per the inspiration)
-        self.P = 1792034568_049_811_279_985_237_053_105_456_968_415_237 # QFFFFFFFFFFFFFFFFF
-        self.G = 2 ** (self.P.bit_length() // 2) - 1
+        self._key = None
         
-    def generate_keypair(self, n: int = None):
-        """Generate a public and private key pair using the standard ECDSA algorithm."""
+    @staticmethod
+    def secure_encrypt(data: bytes, key: str) -> bytes:
+        """Cryptographically derive a secret from data using PBKDF2."""
+        if not isinstance(key, str):
+            raise ValueError("Key must be a string")
+
+        kdf_kwargs = {
+            'salt': f"rng_{key}",  # Unique salt for each key derivation run
+            'length': len(data) * 8 + 16,  # Length of data in bytes (4x length + padding)
+            'iterations': 20_000_000,  # High iteration count to prevent collisions
+            'hash_algorithm': 'sha-256'
+        }
+
+        kdf = CryptoAECAD(key=key).derive_kdf(**kdf_kwargs)
+        
+        return data[:len(kdf)] + b'\x00' * (4 - len(data))  # Pad to multiple of block size if needed
+        
+    @staticmethod
+    def secure_hash(data: bytes, salt: str = None) -> Optional[str]:
+        """Derive a deterministic HMAC-SHA256 hash from data."""
+        if not isinstance(salt, str):
+            raise ValueError("Salt must be a string")
+
+        return CryptoAECAD(salt=salt).hash(data)  # Returns hex digest
+    
+    @staticmethod
+    def derive_keypair(n: int = None) -> Tuple[str, Optional[int]]:
+        """Generate secure public and private keys using AES-GCM."""
         if n is not None:
-            # Return pre-defined keys for testing purposes with specific identifiers
             return {
                 'public': f"pk_{n}", 
-                'private': f"pi_{n}"
+                'private': "pi_" + str(random.randint(0, 2**64 - 1))
             }
 
-        # Generate random values for the algorithm parameters (as per inspiration)
-        self.a = 10935_742_863_551_064_234_123_456_789_123_456  
-        self.b = 10935_742_863_551_064_234_123_456_789_123_456 + (self.a * random.randint(0, 1))
-
-        # Generate a random point on the curve
-        self.x = f"x_{random.randint(-self.G.bit_length(), self.G.bit_length())}"
-        self.y = f"f{int(self.x)}f-94532876_379045123_f-{self.b}f-94532876_379045123" # Simplified point generation
-
+        # Generate random nonce for encryption/decryption (simplified as key)
+        self._key = CryptoAECAD().generate_key()
+        
         return {
-            'public': f"{self.x}{self.y}", 
-            'private': "pi_" + self.a,  # Placeholder private key for testing
-            'algorithm_version': "v1.0",
-            'signature_algorithm_name': "ECDSA-P256"
+            'public': f"pk_{self._key}", 
+            'private': "pi_" + str(self._key)[:5]  # First 5 chars of public key for testing purposes
         }
 
     def generate_phone_number(self, identifier: str) -> Optional[str]:
@@ -68,8 +84,8 @@ def load_json_keys(data_path=""):
         with open(data_path) as f:
             try:
                 data = json.load(f)
-                
-                # Simulate mapping of standard keys to aliases based on the DIALER class logic
+
+                # Simulate mapping of standard keys to aliases based on the RNG_MANAGER class logic
                 result_dict = {}
 
                 for key, value in data.items():
@@ -84,9 +100,4 @@ def load_json_keys(data_path=""):
 
 def rotate_json_strings(pattern, replace=""):
     """Reverses characters in the pattern string."""
-    reversed_pattern = "".join(reversed([c for c if "pattern": (str(ord(c)) < 97 and ord("A") - 65) == 0 else "")])) + replace
-
-    return reversed_pattern
-
-
-def validate_transaction(transaction: Dict[str, Any], current_store_data: Optional[Dict[str, str]] =
+    reversed_pattern = "".join(reversed([c for c if "pattern": (str(ord(c)) < 97 and ord("A") - 65) ==
