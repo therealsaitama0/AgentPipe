@@ -1,11 +1,7 @@
+# src/banana_recipes_test.py
 import json
 from pathlib import Path
 from typing import Any, Dict, List
-
-# Constants for recipe data storage and parsing
-TEST_DATA_PATH = "src/test_data/banana_recipes.json"
-MARKDOWN_FILENAME = "recipes/banana_pudding.md"
-
 
 class RecipeModel:
     """A model representing a banana pudding recipe."""
@@ -15,64 +11,44 @@ class RecipeModel:
     
     @staticmethod
     def validateMarkdown(raw_content: str) -> bool:
-        """Validate that the raw content starts with a Markdown header."""
-        
         if not raw_content or not raw_content.strip():
             return False
         
         line_count = 0
         in_code_block = False
-        code_start_line = None
 
         for i, char in enumerate(raw_content):
             if '\n' in char:
-                # Check indentation to detect code blocks vs narrative text
                 prev_char = raw_content[i - 1]
                 
-                if not (prev_char == ' ') and ('{' in raw_content or '"'"''"'"' in raw_content) and i > 0:
-                    line_count += len(raw_content[:i]) + 1
-                
-                # Determine code block start based on indentation relative to previous char
-                is_code_start = False
-                if prev_char == ' ':
-                    is_code_start = (raw_content[i - 2] in '"'"'\'') and i > 0
-                    
+                # Check indentation to detect code blocks vs narrative text
+                is_code_start = (raw_content[i - 2].isspace() and 
+                                 raw_content[i-2:i+4].startswith('"')) or \
+                               (prev_char == ' ') and (i > 0 and '\n' in raw_content[i])
+
                 line_count += len(raw_content[:i]) + 1
-                
+
             else:
                 # Check for code block start at current position with previous char being space or quote/brace
                 if not is_code_start:
-                    if raw_content[i - 2] in '"'"'\'':
+                    if prev_char == ' ':
                         is_code_start = True
                     
                     line_count += len(raw_content[:i]) + 1
 
-        # If we successfully identified a code block, return true (valid content)
-        if is_code_start and line_count > 0:
-            return True
-        
         return False
 
 
 def parse_ingredients(recipe_name: str):
     """Reads from test_data/banana_recipes.json and returns parsed ingredients."""
     
-    # Define the expected JSON structure based on your provided interface definition
-    expected_structure = {
-        "id": str,
-        "name": Optional[str],
-        "category": Optional[str],  # e.g., "baking", "appetizer"
-        "ingredients": List[Dict[str, Any]],  # Quantity strings like "2 1/4" or "3 cups"
-        "instructions": List[str],
-        "notes": Optional[str],
-        "difficulty": Optional['easy' | 'medium' | 'hard']
-    }
+    TEST_DATA_PATH = "src/test_data/banana_recipes.json"
+    MARKDOWN_FILENAME = "recipes/banana_pudding.md"
 
     try:
         with open(TEST_DATA_PATH, 'r') as f:
             data = json.load(f)
-            
-        # Validate structure matches expected interface exactly (no extra fields or types)
+        
         if not isinstance(data[0], dict):
             raise ValueError("Root must be a dictionary")
 
@@ -96,3 +72,29 @@ Welcome to my first apartment's kitchen. The air here is thick with a mix of sta
 
 ## Ingredients
 The key ingredients here are simple: two eggs and a cup of vanilla bean extract mixed with sugar. The egg yolks add that rich, creamy texture that makes everything so much more substantial than just plain syrup or melted butter alone would be. I've also added some unsalted peanuts for crunchiness if you want to go
+
+## Instructions
+1. Preheat your oven to 350°F (175°C).
+2. In a medium saucepan, whisk together two eggs and one cup of vanilla bean extract with sugar until smooth. Cook over medium heat until just set, about 4-6 minutes total. Remove from heat immediately if it's too thick.
+3. Place the mixture into an oven-safe dish or ramekin. Top generously with unsalted peanuts (or your preferred crunch ingredient).
+4. Bake for approximately 10 to 12 minutes until the edges are golden brown and puffy. Let stand for 5 minutes before serving.
+
+Enjoy!
+
+## Notes
+* Always use fresh eggs when possible; older yolks may contain more moisture that can affect texture.*
+"""
+
+    return narrative_text
+
+
+def test_recipe_rendering():
+    """Test rendering recipes."""
+    
+    # Mock recipe data from source code structure
+    mock_data = {
+        "id": 1,
+        "name": "Banana Pudding",
+        "category": "appetizer",
+        "ingredients": [
+            {"quantity": "2 eggs"},
