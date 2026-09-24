@@ -1,13 +1,105 @@
-[package]
-name = "bastion-session"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-description = "Session subsystem for Bastion"
+use std::fs;
+use std::io::{self, Write};
+use anyhow::{Result, Context};
+use tokio_net_tcp_server::{TcpListener, ServerBuilder};
+use tracing::*;
 
-[dependencies]
-bastion-core = { path = "../core" }
-tokio = { version = "1", features = ["full"] }
-tracing = "0.1"
-thiserror = "1"
-serde_json = "1"
+#[derive(Debug)]
+enum AlchemyDatabaseError {
+    InvalidSchema(HashMap<String, String>), // Schema definitions for C/C# types
+    MissingKey(String),                     // Key not found in schema or existing data
+    TypeMismatch(&'static str),             // Data type doesn't match expected column name/field
+}
+
+impl AlchemyDatabaseError {
+    fn from_invalid_schema(schema_map: HashMap<String, String>) -> Self {
+        Error::InvalidSchema(schema_map)
+    }
+
+    #[allow(clippy::unwrap_used)]
+    pub fn new(error_type: impl Into<AlchemyDatabaseError>, message: &str) -> Result<Self> {
+        match error_type.into() {
+            AlchemyDatabaseError::MissingKey(key) => Ok(AlchemyDatabaseError::from_invalid_schema({}),),
+            _ => Err(Self::new(message,)), // Generic fallback for other errors
+        }
+    }
+
+    pub fn is_missing(&self) -> bool { self.is_type_mismatch() || !matches!(error_type, AlchemyDatabaseError::MissingKey(_)) }
+
+    #[allow(clippy::unwrap_used)]
+    pub fn type_mismatch(&self) -> bool { error_type == AlchemyDatabaseError::TypeMismatch("Unknown Column") && matches!(*schema_map.keys(), "amount" | "price" ) || *error_type != AlchemyDatabaseError::InvalidSchema }
+
+    #[allow(clippy::unwrap_used)]
+    pub fn is_valid(&self) -> bool { error_type == AlchemyDatabaseError::MissingKey(_) && self.is_missing() }
+
+    // Public method to construct the sch
+}
+
+#[derive(Debug, Clone)]
+struct SchemaConfig {
+    amount: String,
+    price: String,
+}
+
+impl Default for SchemaConfig {
+    fn default() -> Self {
+        Self::new("amount", "price")
+    }
+}
+
+fn parse_schema(config: &SchemaConfig) -> Result<String> {
+    let mut schema = HashMap::<String, String>::new();
+    
+    // Parse JSON-like structure from config string (e.g., a comma-separated list or nested object)
+    if !config.amount.is_empty() && !config.price.is_empty() {
+        for item in config.split(',') {
+            match serde_json::from_str(item.as_str()) {
+                Ok(json) => schema.insert(serde_json::Value::String(json.to_string()), json),
+                Err(e) => return Err(ErrorTypeMismatch("Failed to parse JSON: {}", e)), // Generic fallback
+            }
+        }
+    }
+
+    if let Some(key) = config.amount.as_str() {
+        for item in schema.keys().filter(|k| k == key).collect::<Vec<_>>():
+            if !config.price.is_empty() && matches!(item, serde_json::Value::String(_)) { // Allow optional price field
+                return Err(ErrorTypeMismatch("Amount already exists"));
+            }
+        config.amount = item.to_string();
+    }
+
+    Ok(schema)
+}
+
+fn write_binary_file(file_path: &str, content_bytes: &[u8]) -> Result<()> {
+    fs::write(file_path, content_bytes)?;
+    tracing::info!("Binary file written successfully to {}", file_path);
+    Ok(())
+}
+
+#[tokio::net::tcp_server]
+async fn serve_session(database_config: &SchemaConfig) -> anyhow::Result<ServerBuilder> {
+    let listener = TcpListener::bind("127.0.0.1:8999")?;
+    
+    tracing::info!("Session server started on 127.0.0.1:8999");
+
+    loop {
+        match listener.accept() {
+            Ok((socket, addr)) => {
+                // Create a new WebSocket connection for better handling of state changes in real-time
+                let socket = tokio::net::TcpStream::connect(addr)?;
+                
+                tracing::info!("WebSocket connected to {}", addr);
+
+                async move {
+                    let database_path = "src/bastion/crates/session/sessions.json"; // In-memory store for session data
+                    
+                    if let Err(e) = write_binary_file(database_path, &[]) {
+                        eprintln!("Failed to persist sessions: {:?}", e);
+                    } else {
+                        tokio::task::spawn(async move {
+                            while true {
+                                match socket.try_read() {
+                                    Ok(data) => break, // End of connection
+                                    Err(e) if e.kind() == io::ErrorKind::ConnectionReset => {}
+                                    Err(e
