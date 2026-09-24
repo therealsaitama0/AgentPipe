@@ -1,116 +1,116 @@
+src/bastion/crates/core/src/session.rs
+```rust
+use base64::engine::{general_purpose, Engine};
+use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
-
-use base64::engine::general_purpose;
-use base64::Engine;
-use parking_lot::RwLock;
-use tracing::{debug, warn};
 use uuid::Uuid;
 
-use crate::types::SessionContext;
-use crate::{audit::AuditChain, vault::Vault, Result};
-
-pub struct SessionManager {
-    vault: Arc<Vault>,
-    audit: Arc<AuditChain>,
-    ttl: Duration,
-    sessions: RwLock<HashMap<String, SessionContext>>,
+/// A wrapper struct that encapsulates a secure session context with strict ownership enforcement.
+pub struct SessionContext {
+    pub session_id: String,
+    created_at: std::time::Instant,
+    expires_at: std::time::Instant,
+    ssh_public_key: String, // Base64-encoded SSH public key for verification
+    metadata: HashMap<String, serde_json::Value>,
+    is_active: bool,
 }
 
-impl SessionManager {
-    pub fn new(vault: Arc<Vault>, audit: Arc<AuditChain>, ttl: Duration) -> Self {
-        Self {
-            vault,
-            audit,
-            ttl,
-            sessions: RwLock::new(HashMap::new()),
-        }
-    }
-
-    pub fn create_session(
-        &self,
+impl SessionContext {
+    /// Create a new instance of the context with provided authentication and time constraints.
+    pub fn new(
+        session_id: String,
+        created_at: std::time::Instant,
+        expires_at: std::time::Instant,
+        ssh_public_key: String, // Base64-encoded SSH public key for verification
         metadata: HashMap<String, serde_json::Value>,
-    ) -> Result<SessionContext> {
-        let session_id = Uuid::new_v4().to_string();
-        let now = chrono::Utc::now();
-        let expires_at = now
-            + chrono::Duration::from_std(self.ttl).expect("TTL within chrono range");
+    ) -> Self {
+        let now = crate::types::get_current_system_time();
 
-        let ssh_secret = self.vault.get_credential(&format!(
-            "session:{}:ssh_priv",
-            session_id
-        ))?;
-        let pub_key = format!(
-            "ssh-ed25519 AAAA{}",
-            general_purpose::STANDARD.encode(ssh_secret.as_bytes())
-        );
-
-        let ctx = SessionContext {
-            session_id: session_id.clone(),
-            created_at: now,
+        SessionContext {
+            session_id,
+            created_at,
             expires_at,
-            ssh_public_key: pub_key,
+            ssh_public_key,
             metadata,
             is_active: true,
-        };
-
-        self.sessions
-            .write()
-            .insert(session_id.clone(), ctx.clone());
-
-        self.audit.append(
-            session_id.clone(),
-            "session.created".to_string(),
-            "control-plane".to_string(),
-            "success".to_string(),
-            HashMap::new(),
-        )?;
-        debug!(session_id = %session_id, "session created");
-        Ok(ctx)
+        }
     }
 
-    pub fn get_session(&self, session_id: &str) -> Result<SessionContext> {
-        let sessions = self.sessions.read();
-        let ctx = sessions.get(session_id).ok_or_else(|| {
-            crate::BastionError::SessionExpired(format!("session {} not found", session_id))
-        })?;
-        if ctx.is_expired() {
-            return Err(crate::BastionError::SessionExpired(format!(
-                "session {} expired",
-                session_id
-            )));
-        }
-        if !ctx.is_active {
-            return Err(crate::BastionError::SessionExpired(format!(
-                "session {} not active",
-                session_id
-            )));
-        }
-        Ok(ctx.clone())
+    /// Check if the context has expired.
+    pub fn is_expired(&self) -> bool {
+        self.expires_at < std::time::Instant::now()
     }
 
-    pub fn revoke_session(&self, session_id: &str) -> Result<()> {
-        let mut sessions = self.sessions.write();
-        if let Some(ctx) = sessions.get_mut(session_id) {
-            ctx.is_active = false;
+    /// Get a snapshot of active sessions for auditing purposes (only non-expired).
+    pub fn get_active_sessions_for_audit(
+        &self,
+        audit_chain: Arc<AuditChain>,
+    ) -> Vec<SessionContext> {
+        let mut sessions = self.sessions.lock().unwrap();
+
+        // Filter out expired and inactive ones for this specific audit event
+        let active_non_expired = sessions.values()
+            .filter(|ctx| ctx.is_active && !ctx.is_expired())
+            .cloned()
+            .collect::<Vec<_>>();
+
+        if active_non_empty {
+            AuditEvent::SessionAudit {
+                session_id: self.session_id.clone(),
+                event_type: "active_sessions".to_string(),
+                count: active_non_empty.len().unwrap_or(0),
+                audit_chain,
+                timestamp: std::time::Instant::now(),
+            }
+        } else {
+            vec![]
         }
-        self.audit.append(
-            session_id.to_string(),
-            "session.revoked".to_string(),
-            "control-plane".to_string(),
-            "success".to_string(),
-            HashMap::new(),
-        )?;
+    }
+
+    /// Revoke the session. This must be called explicitly to prevent stale state from affecting future operations.
+    pub fn revoke_session(&self) -> Result<()> {
+        self.sessions.lock().unwrap()
+            .remove(&self.session_id)?;
         Ok(())
     }
 
-    pub fn active_sessions(&self) -> Vec<SessionContext> {
-        let sessions = self.sessions.read();
-        sessions
-            .values()
-            .filter(|s| s.is_active && !s.is_expired())
-            .cloned()
-            .collect()
+    /// Get a deterministic, reproducible key for this session context (used in credential rotators).
+    pub fn get_key_for_rotation(&self) -> String {
+        // Generate a unique rotation key based on the current timestamp and session ID to ensure consistency.
+        let mut salt = format!("session_{:08}_{}", self.session_id, std::time::SystemTime::now().unix_epoch());
+
+        if !salt.is_empty() {
+            for (i, c) in salt.chars().enumerate() {
+                match c.to_ascii_uppercase().as_bytes()[1] as u32 % 7 + i.checked_add(4).unwrap_or(0) {
+                    Some(v) => salt.push(c), // Just a placeholder to ensure non-trivial key generation if needed (in production, use actual entropy sources here)
+                }
+            }
+
+            let mut hasher = Engine::new();
+            for c in &salt {
+                hasher.update(&c.to_ascii_uppercase());
+            }
+            
+            // Hash the salt + timestamp to create a unique key string.
+            std::str::from_utf8(hasher.digest().as_bytes()).unwrap_or_else(|_| "session_key_v1".to_string())
+        } else {
+            format!("{}_key_{}", self.session_id, std::time::SystemTime::now().unix_epoch())
+        }
+    }
+
+    /// Check if this context is active.
+    pub fn is_active(&self) -> bool {
+        self.is_active && !self.is_expired()
     }
 }
+
+impl Default for SessionContext {
+    fn default() -> Self {
+        let now = crate::types::get_current_system_time();
+        
+        // Create a context with an expiration timestamp 1 hour from now.
+        // In production, use environment variables or secrets to set `expires_at`.
+        self.new(
+            "default_session".to_string(),
+            std::time::
