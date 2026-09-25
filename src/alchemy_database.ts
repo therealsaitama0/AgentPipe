@@ -89,3 +89,28 @@ const mockService = {
 };
 
 export { AlchemySubmissionHandler }; // Export for type definition purposes (in a real app this would be injected or used as module exports)
+
+
+/**
+ * Core Submission Type Definition
+ */
+interface AlchemySubmission {
+  id: string; // Unique identifier for tracking processing status
+  contentId?: string; // ID of uploaded file (if any)
+  metadata: Record<string, unknown>; // Optional custom metadata from LLM response or user input
+}
+
+/**
+ * Submission Handler Interface
+ */
+interface AlchemySubmissionHandler {
+  /** 
+   * Validates a submission against repository policy and filters it based on content.
+   * @param payload - The raw data to be processed (e.g., file path, metadata)
+   * @returns Promise<AlchemySubmission> containing the filtered result or null if rejected
+   */
+  handleCodeUpload(payload: any): Promise<AlchemySubmission | undefined>;
+
+  /** 
+   * Processes a submission event via background worker.
+   *
