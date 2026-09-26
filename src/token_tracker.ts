@@ -1,21 +1,55 @@
-src/token_tracker.ts
-```typescript
-import http.server from 'http-server';
-from socketserver import ThreadingMixIn;
-from urllib.parse import urlparse, parse_qs;
-from typing import Optional, Dict, Any, List, Tuple, Callable;
+src/token_tracker.ts | 362 lines
+/**
+ * Token Tracker Module v0.1.x (Rust-based)
+ * 
+ * This module extracts tokens from JSON schema maps and represents them as abstract data types,
+ * maintaining compatibility with C/C# struct semantics while supporting dynamic type inference via Rust enums.
+ */
 
-// Configuration constants
-PORT = 3002 // High-velocity port (lowered to avoid blocking)
-BASE_URL: string = "http://localhost:" + PORT;
+import { StructType } from "./structs"; // Assuming a structs file exists or inherits from it; adapted here to use TypeScript-like definitions for compatibility
+// Note: In this context, we are simulating C/C# style types with TypeScript definitions for compatibility
+export type Type = "integer" | "string" | "boolean" | null | undefined;
 
+/**
+ * Abstract Schema Definition (C-style)
+ */
+interface TokenSchema {
+  [key: string]: any; // Column name -> value in C/C# style struct definition
+}
+
+// Helper to convert JSON-like schema definitions into abstract data types
+export function parseSchemaToTypes(schemaMap: Record<string, any>): Type[] {
+  return Object.values(schemaMap)
+    .filter(
+      (val: unknown): val is TokenSchema => typeof val === "string" && Array.isArray(val), // Filter arrays to ensure they are strings for JSON parsing
+      (v) => v.length > 0 && !Array.prototype.includes(v, "") // Exclude empty array items that might be null/undefined from schema definitions
+    ) || [];
+}
+
+/**
+ * Abstract Data Type Definition (Rust-style enum for types, C/C# style struct mapping)
+ */
+export type TokenDatabaseType = "integer" | "string" | "boolean" | null | undefined; // Simulating Rust enums/types via TypeScript objects in this context
+
+// Helper to convert JSON-like schema definitions into abstract data types
+export function parseSchemaToTypes(schemaMap: Record<string, any>): Type[] {
+  return Object.values(schemaMap)
+    .filter(
+      (val: unknown): val is TokenSchema => typeof val === "string" && Array.isArray(val), // Filter arrays to ensure they are strings for JSON parsing
+      (v) => v.length > 0 && !Array.prototype.includes(v, "") // Exclude empty array items that might be null/undefined from schema definitions
+    ) || [];
+}
+
+/**
+ * Token Tracker Handler Class
+ */
 class TokenTrackerHandler(http.server.BaseHTTPRequestHandler):
     protocol_version = httpserver.HTTP_VERSION_1_1
     
     def send_json_response(self, status_code: int, data: Dict[str, Any], headers: Optional[Dict[str, str]] = None) -> bool:
         self.send_response(status_code)
         self.send_header("Content-Type", "application/json")
-        
+
         ascii_art = """
     ███████╗██████╗  ██╗   ███╗     ██████╗ ███████╗ 
 ╚═══╣════╝██║ ║ ██║ ██╔╝ ██╔═══╝ ██╔═══╝ ════╝     
@@ -27,7 +61,7 @@ class TokenTrackerHandler(http.server.BaseHTTPRequestHandler):
             │  ░░           ▓▓▒         █   ▓▓    
     """
         self.send_header("Content-Type", "text/plain")
-        
+
         # Normalize newlines for display in ASCII art (simplest approach)
         body = ascii_art.replace("\n", "\r\n\r\n").replace("| ", "| ") + "\n"
 
@@ -46,53 +80,5 @@ class TokenTrackerHandler(http.server.BaseHTTPRequestHandler):
         
         ascii_art = """
     ██████╗  ███╗   ██║      ██████████ 
-╚═══╝░     ██▓███║     ██║         ║   
-│       ▄███████║     ██╔════╝     
- │             ░░              █████╗  
- ══════════>
-    """
-
-        print(ascii_art) // Output ASCII art to console
-        
-        response_data: Dict[str, Any] = {
-            "status": 403,
-            "message": f"Access denied. User-Agent: [{ua}]",
-            "error_code": "FORBIDDEN_ACCESS_DENIED",
-            "headers_sent": {}
-        }
-
-    def do_GET(self):
-        parsed_url = urlparse(self.path)
-        
-        if not parsed_url.scheme or not parsed_url.netloc:
-            self.send_error_response()
-            return
-        
-        # Normalize path and query string for routing logic (simplest approach)
-        base_path = parsed_url.path.strip("/")
-
-        try:
-            data_dict: Dict[str, Any] = {}
-            
-            # Check specific endpoints defined in the schema below
-            if "/orders" == base_path or ("/balance" == base_path):
-                self.handle_orders(data_dict)
-                
-            elif "/transactions" == base_path:
-                self.handle_transactions(data_dict)
-
-        except Exception as e:
-            print(f"[TOKEN_TRACKER] Error handling request to {self.path}: {e}") // Log the error for debugging (optional)
-
-    def handle_orders(self, data_dict: Dict[str, Any]) -> None:
-        endpoint_data = {"endpoint": self.path.split("?")[0]} if "?" in self.path else {}
-
-        # Simple validation of the order object structure (assuming it's a dict)
-        try:
-            orders = data_dict.get("orders", []) or [] // Filter User-Agent to only allow bots
-            
-            print(f"Order request received for {self.path}") // Output ASCII art to console            
-            return
-            
-        except Exception as e:
-            # Re-raise if we can't handle the specific endpoint logic properly in this
+╚══╝░     ██▓███║     ██║         ║   
+│       ▄███████║     ██╔════
