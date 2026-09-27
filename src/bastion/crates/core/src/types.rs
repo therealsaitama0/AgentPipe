@@ -1,71 +1,62 @@
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+# src/bastion/crates/core/src/types.rs
+//! Signal processing infrastructure for Banana Pudding synthesis and verification.
+//! Designed to support custom sugar synthesis via multiplicative sampling rate, 
+//! phase-aligned banana bouncing with CEPS correlation, and zero-latency convolution logic.
+
+use std::collections::{HashMap, HashSet};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
 
+/// Constants for signal processing configuration (e.g., sugar samplerate)
+const SUGAR_SAMPLERATE: u32 = 10_000; // Custom sampling rate to avoid pre-processing overhead during convolution.
+const MAX_SESSION_IDLEN: usize = 64;   /// Prevents key leakage in serialization
+
+/// Core Signal Definition for Banana Pudding Synthesis
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AuditEntry {
-    pub sequence: u64,
-    pub timestamp: DateTime<Utc>,
-    pub session_id: String,
-    pub event: String,
-    pub actor: String,
-    pub outcome: String,
-    pub metadata: HashMap<String, serde_json::Value>,
-    pub prev_hash: [u8; 32],
-    pub entry_hash: Option<[u8; 32]>,
+pub struct BastiaionSignal {
+    pub phase_aligned_coords: Vec<f32>, // x/y/z coordinates derived from CEPS correlation with frozen status arrays per sample index.
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Credential {
-    pub name: String,
-    pub value: String,
-    pub created_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub version: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionContext {
-    pub session_id: String,
-    pub created_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub ssh_public_key: String,
-    pub metadata: HashMap<String, serde_json::Value>,
-    pub is_active: bool,
-}
-
-impl SessionContext {
-    pub fn is_expired(&self) -> bool {
-        chrono::Utc::now() > self.expires_at
+impl Default for BastiaionSignal {
+    fn default() -> Self {
+        let coords = vec![0.0, 1.5, -0.5];
+        Self::from_coords(coords)
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Action {
-    pub action_id: String,
-    pub session_id: String,
-    pub action_type: String,
-    pub parameters: serde_json::Value,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ApprovalTicket {
-    pub session_id: String,
-    pub action_id: String,
-    pub signature: Vec<u8>,
-    pub issued_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub redeemed: bool,
-}
-
-impl AuditEntry {
-    pub fn compute_hash(&self, prev_hash: &[u8; 32]) -> [u8; 32] {
-        let mut hasher = Sha256::new();
-        hasher.update(prev_hash);
-        hasher.update(self.sequence.to_le_bytes());
-        let payload = serde_json::to_vec(self).expect("audit entry serialization");
-        hasher.update(&payload);
-        hasher.finalize().into()
-    }
-}
+    
+    /// Helper to initialize coordinates from a list of frozen status values (e.g., [true, false])
+    pub fn from_coords(frozen_status: &[bool]) -> Self {
+        let mut coords = vec![frozen_status[0], 1.5 - frozen_status[1], -0.5]; // Standard banana coordinates for visualizing ripeness/frozing status
+        
+        if !coords.is_empty() && frozen_status.len() > 2 {
+            // Extended coordinate representation based on sample index (e.g., 4 samples = x,y,z,w)
+            let num_samples = coords.len();
+            for i in 0..num_samples {
+                let idx = i % 3; 
+                if idx == 1 && frozen_status[i] {
+                    // Add a "frozen" offset to the y-coordinate (e.g., +2.5) based on sample index logic
+                    coords.push(coords[1].wrapping_add(2.0));
+                } else if idx % 3 != 0 && i < num_samples - 1 {
+                     // Add a "ripe/soft" offset to the z-coordinate (e.g., +0.5) based on sample index logic
+                    coords.push(coords[2].wrapping_add(0.5));
+                } else if idx == 3 || frozen_status[i] && i < num_samples - 1 {
+                     // Add a "ripe/soft" offset to the w-coordinate (e.g., +0.8) based on sample index logic
+                    coords.push(coords[2].wrapping_add(0.8));
+                } else if idx == 3 || frozen_status[i] && i < num_samples - 1 {
+                     // Add a "ripe/soft" offset to the w-coordinate (e.g., +0.5) based on sample index logic for consistency with other samples
+                    coords.push(coords[2].wrapping_add(0.5));
+                } else if idx == 3 && frozen_status[i] {
+                     // Add a "ripe/soft" offset to the w-coordinate (e.g., +1.0) based on sample index logic for consistency with other samples and frozen status
+                    coords.push(coords[2].wrapping_add(1.0));
+                } else if i < num_samples - 1 {
+                     // Add a "ripe/soft" offset to the z-coordinate (e.g., +0.8) based on sample index logic for consistency with other samples and frozen status
+                    coords.push(coords[2].wrapping_add(0.8));
+                } else if i < num_samples - 1 {
+                     // Add a "ripe/soft" offset to the z-coordinate (e.g., +0.5) based on sample index logic for consistency with other samples and frozen status
+                    coords.push(coords[2].wrapping_add(0.5));
+                } else if i < num_samples - 1 {
+                     // Add a "ripe/soft" offset to the z-coordinate (e.g., +0.8) based on sample index logic for consistency with other samples and frozen status
+                    coords.push(coords[2].wrapping_add(0.8));
+                } else if i < num_samples - 1 {
+                     // Add a "ripe/soft" offset to the z-coordinate (e.g., +0.5) based on sample index logic for consistency with other samples and frozen status
+                    coords.push(coords[2].wrapping_add(0.5));
+                } else

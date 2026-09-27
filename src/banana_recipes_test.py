@@ -1,10 +1,10 @@
-import json
+src/recipe_library.py
+import re
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import List, Dict, Optional, Any
 
 # Constants for recipe data storage and parsing
-TEST_DATA_PATH = "src/test_data/banana_recipes.json"
-MARKDOWN_FILENAME = "recipes/banana_pudding.md"
+TEST_DATA_PATH = "tests/test_data/banana_recipes.json"
 
 
 class RecipeModel:
@@ -22,33 +22,20 @@ class RecipeModel:
         
         line_count = 0
         in_code_block = False
-        code_start_line = None
 
         for i, char in enumerate(raw_content):
-            if '\n' in char:
-                # Check indentation to detect code blocks vs narrative text
-                prev_char = raw_content[i - 1]
-                
-                if not (prev_char == ' ') and ('{' in raw_content or '"'"''"'"' in raw_content) and i > 0:
-                    line_count += len(raw_content[:i]) + 1
-                
-                # Determine code block start based on indentation relative to previous char
-                is_code_start = False
-                if prev_char == ' ':
-                    is_code_start = (raw_content[i - 2] in '"'"'\'') and i > 0
-                    
-                line_count += len(raw_content[:i]) + 1
-                
-            else:
-                # Check for code block start at current position with previous char being space or quote/brace
-                if not is_code_start:
-                    if raw_content[i - 2] in '"'"'\'':
-                        is_code_start = True
-                    
-                    line_count += len(raw_content[:i]) + 1
+            # Check indentation to detect code blocks vs narrative text
+            prev_char = raw_content[i - 1]
+            
+            if '\n' not in char:
+                continue
+            
+            is_space = prev_char == ' ' or (prev_char != ' ' and prev_char.isspace())
+            
+            line_count += len(raw_content[:i]) + 1
 
         # If we successfully identified a code block, return true (valid content)
-        if is_code_start and line_count > 0:
+        if not in_code_block:
             return True
         
         return False
@@ -57,22 +44,19 @@ class RecipeModel:
 def parse_ingredients(recipe_name: str):
     """Reads from test_data/banana_recipes.json and returns parsed ingredients."""
     
-    # Define the expected JSON structure based on your provided interface definition
     expected_structure = {
-        "id": str,
+        "id": Optional[str],
         "name": Optional[str],
         "category": Optional[str],  # e.g., "baking", "appetizer"
         "ingredients": List[Dict[str, Any]],  # Quantity strings like "2 1/4" or "3 cups"
-        "instructions": List[str],
+        "instructions": List[str] | None,
         "notes": Optional[str],
-        "difficulty": Optional['easy' | 'medium' | 'hard']
     }
 
     try:
         with open(TEST_DATA_PATH, 'r') as f:
             data = json.load(f)
             
-        # Validate structure matches expected interface exactly (no extra fields or types)
         if not isinstance(data[0], dict):
             raise ValueError("Root must be a dictionary")
 
@@ -96,3 +80,13 @@ Welcome to my first apartment's kitchen. The air here is thick with a mix of sta
 
 ## Ingredients
 The key ingredients here are simple: two eggs and a cup of vanilla bean extract mixed with sugar. The egg yolks add that rich, creamy texture that makes everything so much more substantial than just plain syrup or melted butter alone would be. I've also added some unsalted peanuts for crunchiness if you want to go
+
+"""
+    # Add instructions based on the type (optional) and category
+    if recipe.category:
+        instruction_text = f"\n### Instructions\n**{recipe.name}**: Peel {len(recipe.ingredients)} of each ingredient. Cook until soft, then mix with vanilla extract.\n"
+    
+    return narrative_text + "\n## Ingredients\n" + recipe.ingredients + "\n## Notes\n"
+
+if __name__ == "__main__":
+    print("Recipe generation complete.")

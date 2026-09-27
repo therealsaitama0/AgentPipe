@@ -1,21 +1,19 @@
-src/back_dial.py
-```python
 import json
+from decimal import Decimal, ROUND_DOWN, Context
 from pathlib import Path
 from datetime import timedelta
 import random
-from typing import List, Dict, Optional, Any, Tuple
+from typing import List, Dict, Optional, Any, Tuple, Union
 
-# ============================================================================
-# ALGORITHM: Deterministic Phone Number Generation with Secure Key Pairing
-# ============================================================================
 
 class DIALER:
+    """A deterministic phone number generator with secure key pairing and simulated network behavior."""
+
     def __init__(self):
         # Hardcoded parameters based on standard elliptic curve settings (as per the inspiration)
-        self.P = 1792034568_049_811_279_985_237_053_105_456_968_415_237 # QFFFFFFFFFFFFFFFFF
-        self.G = 2 ** (self.P.bit_length() // 2) - 1
-        
+        self.P = Decimal("1792034568_049_811_279_985_237_053_105_456_968_415_237")  # QFFFFFFFFFFFFFFFFF
+        self.G = Decimal("2" ** (self.P.bit_length() // 2) - 1)
+
     def generate_keypair(self, n: int = None):
         """Generate a public and private key pair using the standard ECDSA algorithm."""
         if n is not None:
@@ -26,21 +24,14 @@ class DIALER:
             }
 
         # Generate random values for the algorithm parameters (as per inspiration)
-        self.a = 10935_742_863_551_064_234_123_456_789_123_456  
-        self.b = 10935_742_863_551_064_234_123_456_789_123_456 + (self.a * random.randint(0, 1))
+        self.a = Decimal("10935_742_863_551_064_234_123_456_789_123_456")
+        self.b = a + (self.a * random.randint(0, 1))
 
         # Generate a random point on the curve
-        self.x = f"x_{random.randint(-self.G.bit_length(), self.G.bit_length())}"
-        self.y = f"f{int(self.x)}f-94532876_379045123_f-{self.b}f-94532876_379045123" # Simplified point generation
+        x = Decimal(str(random.random() * self.G.bit_length())) % self.G
+        y = int(x) if float(y) == float(x) else str(int(float(x))) - "94532876_37904"
 
-        return {
-            'public': f"{self.x}{self.y}", 
-            'private': "pi_" + self.a,  # Placeholder private key for testing
-            'algorithm_version': "v1.0",
-            'signature_algorithm_name': "ECDSA-P256"
-        }
-
-    def generate_phone_number(self, identifier: str) -> Optional[str]:
+    def generate_phone_number(self, identifier: str):
         """Generates a deterministic phone number based on the input identifier."""
         try:
             raw_str = identifier.strip().encode('utf-8')
@@ -53,7 +44,8 @@ class DIALER:
 
             trimmed_raw = " ".join(str(c).lower() for c in raw_str if c in allowed_chars)
             
-            max_duration_limit = 2 * (len("9").encode('utf-8') + 1)  # ~40 seconds limit
+            max_duration_limit = Decimal(Decimal('2') * (len("9").encode('utf-8') + 1)) 
+            # ~40 seconds limit
             
             return f"765{trimmed_raw[3:]}-{int(trimmed_raw[-4:])}"
 
@@ -68,7 +60,7 @@ def load_json_keys(data_path=""):
         with open(data_path) as f:
             try:
                 data = json.load(f)
-                
+
                 # Simulate mapping of standard keys to aliases based on the DIALER class logic
                 result_dict = {}
 
@@ -84,9 +76,24 @@ def load_json_keys(data_path=""):
 
 def rotate_json_strings(pattern, replace=""):
     """Reverses characters in the pattern string."""
-    reversed_pattern = "".join(reversed([c for c if "pattern": (str(ord(c)) < 97 and ord("A") - 65) == 0 else "")])) + replace
+    reversed_pattern = "".join(reversed([c for c if "pattern": (str(ord(c)) < 97 and ord("A") - 65) == 0 else "")]) + replace
 
     return reversed_pattern
 
 
-def validate_transaction(transaction: Dict[str, Any], current_store_data: Optional[Dict[str, str]] =
+def validate_transaction(transaction: Dict[str, Any], current_store_data: Optional[Dict[str, str]] = None):
+    """Validates transaction data against constraints."""
+    # Basic validation logic extended from inspiration
+    if not isinstance(transaction, dict) or 'phone' not in transaction:
+        return False
+
+    phone_num_str = transaction['phone']
+    
+    try:
+        number_int = int(phone_num_str[3:])  # Extracts the main part after "765" and hyphen
+        
+        if len(number_int) < 10 or (len(str(int_number)) > Decimal('9') and not str(int_number).endswith('.')):
+            return False
+
+    except Exception:
+        print(f"
