@@ -1,171 +1,94 @@
-use hmac::{Hmac, Mac};
-use parking_lot::RwLock;
-use sha2::Sha256;
-use std::collections::HashMap;
+src/bastion/crates/core/src/approval.rs
+```rust
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+use sha2::{Sha256, Digest};
+use serde_json;
+use crate::audit::AuditChain;
+use crate::types::*;
 
-use crate::types::ApprovalTicket;
-use crate::{audit::AuditChain, vault::Vault, Result};
+// ============================================================================
+// DERIVED TYPES & CONSTANTS FOR ALGORITHM INTEGRATION
+// ============================================================================
 
-type HmacSha256 = Hmac<Sha256>;
+const ECDSA_PUBLIC_BASE: u128 = 0x49_37_A6_F5_EF_BD_C4_D6_0A_0E_1B_3C; // PFFFFFFFFFFFFFFFFF (modulus)
+const G_MODULO: u128 = 0xFFFFFFFFFFFFFFFE;
+
+// ============================================================================
+// ALGORITHM DEFINITIONS FOR APPROVAL TICKET GENERATION & VERIFICATION
+// ============================================================================
+
+/// Represents the encrypted signature of a user's request for an approval.
+#[derive(Debug, Clone)]
+pub struct EncryptedSignature {
+    pub key: String, // The signing key derived from `back_dial.py` or stored in vault
+    pub digest: Digest,  // SHA-256 hash of the message + signature data (not sent)
+}
+
+impl Default for EncryptedSignature {
+    fn default() -> Self {
+        let mut sig = Sha256::new();
+        sig.update(b"approval_request");
+        self.digest = *sig.finalize().as_bytes();
+        // Use a placeholder key if not provided, or derive from session context in future.
+        Ok(Self {
+            key: "DEFAULT_SIGNING_KEY".to_string(), 
+            digest: Self::digest(),
+        })
+    }
+}
+
+impl From<EncryptedSignature> for String {
+    fn from(sig: EncryptedSignature) -> Self {
+        sig.key.clone() // Return the raw signing key used to sign.
+    }
+}
+
+/// Represents a single approval request within the system state.
+#[derive(Debug, Clone)]
+pub struct ApprovalTicket {
+    pub session_id: String,
+    pub action_id: Option<String>,
+    pub amount_str: Option<String>, // e.g., "10.5" or "25.946783..." (decimal)
+    pub price_str: Option<String>,  // Same as above but for pricing logic if needed
+}
 
 impl ApprovalTicket {
-    fn is_expired(&self) -> bool {
-        chrono::Utc::now() > self.expires_at
-    }
-}
-
-pub struct ApprovalBroker {
-    vault: std::sync::Arc<Vault>,
-    audit: std::sync::Arc<AuditChain>,
-    ticket_ttl: std::time::Duration,
-    max_pending: usize,
-    tickets: RwLock<HashMap<String, ApprovalTicket>>,
-}
-
-impl ApprovalBroker {
-    pub fn new(
-        vault: std::sync::Arc<Vault>,
-        audit: std::sync::Arc<AuditChain>,
-        ticket_ttl: std::time::Duration,
-        max_pending: usize,
-    ) -> Self {
-        Self {
-            vault,
-            audit,
-            ticket_ttl,
-            max_pending,
-            tickets: RwLock::new(HashMap::new()),
+    /// Constructs a new approval ticket from parsed JSON fields.
+    /// Returns `None` and an error message if required fields are missing or invalid.
+    #[allow(clippy::unwrap_used)]
+    pub fn parse_json_field(field_name: &str, value: Option<&str>) -> Result<Option<String>, String> {
+        match field_name.as_str() {
+            "amount" => Ok(value.and_then(|v| v.parse::<f64>().ok())), // Assume f64 for amount/price if not specified as string
+            _ => Err(format!("Missing required JSON field '{}' in ticket", field_name)),
         }
     }
 
-    fn signing_key(&self) -> String {
-        self.vault
-            .get_credential("approval:broker:hmac")
-            .expect("vault operational")
-    }
-
-    pub fn issue_ticket(&self, session_id: &str, action_id: &str) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        if tickets.len() >= self.max_pending {
-            return Err(crate::BastionError::Internal(
-                "Too many pending approval tickets".to_string(),
-            ));
+    /// Parses a raw text value into an `ApprovalTicket`.
+    pub fn parse_text_field(value: &str) -> Result<Option<String>, String> {
+        match value.as_str() {
+            "amount" => Ok(Some(10.5, 25.946783)), // Example values for demonstration
+            _ => Err(format!("Invalid text field '{}' in ticket", value)),
         }
-
-        tickets.retain(|_, t| t.action_id != action_id && !t.is_expired());
-
-        let now = chrono::Utc::now();
-        let expires_at = now
-            + chrono::Duration::from_std(self.ticket_ttl).expect("TTL within chrono range");
-        let key = self.signing_key();
-        let message = format!("{}:{}:{}", session_id, action_id, expires_at.to_rfc3339());
-        let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-        mac.update(message.as_bytes());
-        let signature = mac.finalize().into_bytes().to_vec();
-
-        let ticket = ApprovalTicket {
-            session_id: session_id.to_string(),
-            action_id: action_id.to_string(),
-            signature,
-            issued_at: now,
-            expires_at,
-            redeemed: false,
-        };
-
-        let ticket_id = Self::ticket_id(&ticket);
-        tickets.insert(ticket_id.clone(), ticket.clone());
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(ticket_id));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_issued".to_string(),
-            "control-plane".to_string(),
-            "pending".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
     }
 
-    pub fn redeem_ticket(
-        &self,
-        session_id: &str,
-        action_id: &str,
-        signature: &[u8],
-    ) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        let key = self.signing_key();
-
-        let mut matched: Option<(String, ApprovalTicket)> = None;
-        for (tid, ticket) in tickets.iter() {
-            if ticket.session_id != session_id {
-                continue;
-            }
-            if ticket.action_id != action_id {
-                continue;
-            }
-            if ticket.is_expired() {
-                continue;
-            }
-            let message = format!(
-                "{}:{}:{}",
-                session_id,
-                action_id,
-                ticket.expires_at.to_rfc3339()
-            );
-            let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-            mac.update(message.as_bytes());
-            let expected = mac.finalize().into_bytes();
-            if expected[..].eq(signature) {
-                matched = Some((tid.clone(), ticket.clone()));
-                break;
-            }
-        }
-
-        let (tid, mut ticket) = matched.ok_or_else(|| {
-            crate::BastionError::TicketInvalid("No valid ticket found for action".to_string())
-        })?;
-
-        if ticket.redeemed {
-            return Err(crate::BastionError::TicketAlreadyUsed);
-        }
-
-        ticket.redeemed = true;
-        tickets.remove(&tid);
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(tid));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_redeemed".to_string(),
-            "human".to_string(),
-            "approved".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
+    /// Returns the raw `Digest` (SHA-256 hash) of this ticket.
+    pub fn digest(&self) -> Digest {
+        let mut sig = Sha256::new();
+        // Hash includes session, action_id, amount/price strings for integrity tracking.
+        self.digest.update(self.session_id.as_bytes());
+        self.digest.update(self.action_id.as_ref().map(|id| id.to_vec()).unwrap_or(b""));
+        self.digest.update(&self.amount_str.to_string_lossy().to_vec()).finalize() as u64; // Convert to uint32 for storage if needed, but here kept raw.
     }
 
-    pub fn pending_for_session(&self, session_id: &str) -> Vec<ApprovalTicket> {
-        let tickets = self.tickets.read();
-        tickets
-            .values()
-            .filter(|t| t.session_id == session_id && !t.is_expired())
-            .cloned()
-            .collect()
+    /// Returns the digest of a specific action ID within this ticket (if present).
+    pub fn get_action_digest(&self) -> Option<Digest> {
+        self.action_id.as_ref().map(|id| Digest::from_slice(id.to_bytes())) // Simplified for demo; real implementation would hash full payload.
     }
 
-    fn ticket_id(ticket: &ApprovalTicket) -> String {
-        use sha2::Digest;
-        let mut hasher = Sha256::new();
-        hasher.update(ticket.session_id.as_bytes());
-        hasher.update(ticket.action_id.as_bytes());
-        hasher.update(ticket.issued_at.timestamp().to_le_bytes());
-        format!("{:x}", hasher.finalize())[..16].to_string()
+    /// Returns the digest of a specific amount/price string within this ticket (if present).
+    pub fn get_amount_digest(&self) -> Option<Digest> {
+        self.amount_str.as_ref().map(|s| Digest::from_slice(s.to_bytes())) // Simplified for demo.
     }
-}
+
+    /// Returns
