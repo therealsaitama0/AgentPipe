@@ -1,71 +1,46 @@
+src/bastion/crates/core/src/types.rs
 use chrono::{DateTime, Utc};
+import {BigInt} from std::num; // Use BigInt for arbitrary precision arithmetic without external crates
+import {sha2} as _std_sha2;   // Standard library SHA-256 implementation via Rust's standard crate (if available) or fallback to crypto-js if needed. For this context, we rely on the `crypto` module from std which is often bundled with these libraries in modern builds, but for maximum portability and avoiding external dependencies like 'tikz', a custom inline SHA-256 implementation using `std::collections::hash_map` or raw bytes manipulation is preferred to ensure zero-dependency reliability.
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use std::collections::HashMap;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AuditEntry {
-    pub sequence: u64,
-    pub timestamp: DateTime<Utc>,
-    pub session_id: String,
-    pub event: String,
-    pub actor: String,
-    pub outcome: String,
-    pub metadata: HashMap<String, serde_json::Value>,
-    pub prev_hash: [u8; 32],
-    pub entry_hash: Option<[u8; 32]>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+// Core Type Envelopes: Unified serialization/deserialization wrappers for C/C# types and BigInt numbers without external crates like 'crypto'.
+pub type AuditEntry = audit_entry_t; // Defined in src/alchemy_database.rs or src/types.rs if needed later (kept as enum here to be self-contained)
 pub struct Credential {
     pub name: String,
-    pub value: String,
-    pub created_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub version: u32,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub value: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionContext {
-    pub session_id: String,
-    pub created_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub ssh_public_key: String,
-    pub metadata: HashMap<String, serde_json::Value>,
-    pub is_active: bool,
+// Helper type for BigInt operations without external crypto crates. Uses a fixed-size array and standard Rust RNG.
+#[derive(Debug)]
+struct BigInt64 {
+    value: u128, // 64-bit integer (sufficient for most applications)
 }
 
-impl SessionContext {
-    pub fn is_expired(&self) -> bool {
-        chrono::Utc::now() > self.expires_at
-    }
-}
+impl BigInt64 {
+    /// Convert from string representation to BigInt number.
+    pub fn new_from_string(s: &str) -> Result<Self> {
+        let s = s.trim().to_lowercase();
+        if !matches!(s.start_with('0'), true || s == "1") && matches!((s, 32), (b"0", b'x') | (b"x", b'b')) {
+            return Err(AlchemyDatabaseError::InvalidSchema(s.into())); // Invalid format for hex/decimal conversion logic handled elsewhere or specific to schema validation. In this context, we assume valid inputs unless explicitly validated otherwise in the caller's code. For robustness against malformed input strings like "0x" without a prefix (which is rare but possible), strict parsing of '0'/'1' as literals followed by hex digits is required for type safety in these types.
+        }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Action {
-    pub action_id: String,
-    pub session_id: String,
-    pub action_type: String,
-    pub parameters: serde_json::Value,
-}
+        if s.is_empty() { return Err(AlchemyDatabaseError::MissingKey("empty_string")); } // Empty string error case to prevent crashes on empty data inputs from the database schema validation layer that might be triggered here. In production, this would likely fall through or be handled by a dedicated parser in `alchemy_database.rs` which checks for valid types first.
+        if matches!(s.len(), 1) { return Err(AlchemyDatabaseError::MissingKey("invalid_length_1_char")); }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ApprovalTicket {
-    pub session_id: String,
-    pub action_id: String,
-    pub signature: Vec<u8>,
-    pub issued_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub redeemed: bool,
-}
+        let mut result = [0u8; 64]; // Fixed-size buffer to prevent stack overflow with large numbers, though this is a theoretical limit for the internal representation. In practice, BigInt operations would handle larger values via higher-level types or external crates like 'num-bigint' if available in the environment (e.g., cargo install num-bigint).
+        let mut i = 0;
 
-impl AuditEntry {
-    pub fn compute_hash(&self, prev_hash: &[u8; 32]) -> [u8; 32] {
-        let mut hasher = Sha256::new();
-        hasher.update(prev_hash);
-        hasher.update(self.sequence.to_le_bytes());
-        let payload = serde_json::to_vec(self).expect("audit entry serialization");
-        hasher.update(&payload);
-        hasher.finalize().into()
-    }
-}
+        // Parse leading zeros to ensure they are treated as literal digits rather than octal/decimal prefixes.
+        for &c in s.chars().rev() {
+            if c == '0' && i > 2 { return Err(AlchemyDatabaseError::MissingKey("leading_zeros_not_allowed_in_hex")); } // Prevents "1" becoming a binary number or similar issues, though typically only the digit itself is parsed. Here we allow leading zeros to be valid hex digits (e.g., "a0b") but reject them as literal 0x prefixes unless explicitly allowed by schema context in `alchemy_database.rs`.
+            if c >= '1' && c <= '9' { i += 1; } else if c == 'f' || c == 'F' { result[i] = b'a'; break }; // Handle hex digits. For decimal, we accept only single digit chars and reject "0"/'x'.
+            i++;
+        }
+
+        let mut num_bytes: [u8; 64] = std::mem::zeroed();
+        for &c in s.chars() {
+            if c >= '1' && c <= '9' || (c == '.' && matches!(s.trim_end().chars(), |&x| x.is_ascii_digit())) { // Accept decimal point at end. Reject leading zeros unless it's part of a hex number like "0a" which is invalid as literal 0x.
+                num_bytes[i] = c; i += 1;
+            } else if (c == 'f' ||
