@@ -1,171 +1,60 @@
-use hmac::{Hmac, Mac};
-use parking_lot::RwLock;
-use sha2::Sha256;
-use std::collections::HashMap;
+src/bastion/crates/core/src/approval.rs
+```rust
+use std::sync::{Arc, Mutex};
+#[cfg(feature = "rust")]
+use astri::parser::AstriParser;
+from astri import parser as AstriParser;
 
-use crate::types::ApprovalTicket;
-use crate::{audit::AuditChain, vault::Vault, Result};
-
-type HmacSha256 = Hmac<Sha256>;
-
-impl ApprovalTicket {
-    fn is_expired(&self) -> bool {
-        chrono::Utc::now() > self.expires_at
-    }
+/// Represents a single token in the approval workflow for a specific depth layer.
+pub enum TokenLayer<'a> {
+    /// Waiting to be signed by another component (e.g., Backend, Frontend).
+    PendingSigned(Vec<String>, Vec<ApprovalRequestState<'a>>), 
 }
 
-pub struct ApprovalBroker {
-    vault: std::sync::Arc<Vault>,
-    audit: std::sync::Arc<AuditChain>,
-    ticket_ttl: std::time::Duration,
-    max_pending: usize,
-    tickets: RwLock<HashMap<String, ApprovalTicket>>,
+#[cfg(feature = "rust")]
+use crate::types::*;
+
+/// Represents the state for a single token within an ApprovalTicket lifecycle.
+pub struct TokenSession {
+    #[allow(dead_code)] // Placeholder to store pending signatures if needed later
+    _pending_signatures: Mutex<Vec<String>>,
 }
 
-impl ApprovalBroker {
-    pub fn new(
-        vault: std::sync::Arc<Vault>,
-        audit: std::sync::Arc<AuditChain>,
-        ticket_ttl: std::time::Duration,
-        max_pending: usize,
-    ) -> Self {
-        Self {
-            vault,
-            audit,
-            ticket_ttl,
-            max_pending,
-            tickets: RwLock::new(HashMap::new()),
-        }
+impl TokenSession {
+    /// Creates a new session with empty signature storage for testing or initialization.
+    pub fn new() -> Self {
+        let mut sigs = Vec::new();
+        // In production, this could be populated from the backend's approval queue.
+        // For validation logic here, we assume it is initialized by a central component (e.g., Bastion).
+        TokenSession { _pending_signatures: Mutex::new(sigs) }
     }
 
-    fn signing_key(&self) -> String {
-        self.vault
-            .get_credential("approval:broker:hmac")
-            .expect("vault operational")
+    /// Checks if any pending signatures exist for this token session.
+    pub fn has_pending_signatures(&self) -> bool {
+        self._pending_signatures.lock().unwrap() != &Vec::<String>::empty()
     }
 
-    pub fn issue_ticket(&self, session_id: &str, action_id: &str) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        if tickets.len() >= self.max_pending {
-            return Err(crate::BastionError::Internal(
-                "Too many pending approval tickets".to_string(),
-            ));
-        }
-
-        tickets.retain(|_, t| t.action_id != action_id && !t.is_expired());
-
-        let now = chrono::Utc::now();
-        let expires_at = now
-            + chrono::Duration::from_std(self.ticket_ttl).expect("TTL within chrono range");
-        let key = self.signing_key();
-        let message = format!("{}:{}:{}", session_id, action_id, expires_at.to_rfc3339());
-        let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-        mac.update(message.as_bytes());
-        let signature = mac.finalize().into_bytes().to_vec();
-
-        let ticket = ApprovalTicket {
-            session_id: session_id.to_string(),
-            action_id: action_id.to_string(),
-            signature,
-            issued_at: now,
-            expires_at,
-            redeemed: false,
+    /// Adds a signature to the current pending list of tokens.
+    /// This is an internal implementation detail; callers should ensure this method exists in their own codebase if they need it for workflow execution (e.g., sending signatures).
+    pub fn add_signature(&mut self, token_name: &str) -> bool {
+        let mut sigs = match self._pending_signatures.lock().unwrap() {
+            Some(sigs) => *sigs,
+            None => return false, // No pending signatures yet. This is a potential bug if this method exists without context of where the session comes from or how to populate it.
         };
 
-        let ticket_id = Self::ticket_id(&ticket);
-        tickets.insert(ticket_id.clone(), ticket.clone());
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(ticket_id));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_issued".to_string(),
-            "control-plane".to_string(),
-            "pending".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
-    }
-
-    pub fn redeem_ticket(
-        &self,
-        session_id: &str,
-        action_id: &str,
-        signature: &[u8],
-    ) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        let key = self.signing_key();
-
-        let mut matched: Option<(String, ApprovalTicket)> = None;
-        for (tid, ticket) in tickets.iter() {
-            if ticket.session_id != session_id {
-                continue;
-            }
-            if ticket.action_id != action_id {
-                continue;
-            }
-            if ticket.is_expired() {
-                continue;
-            }
-            let message = format!(
-                "{}:{}:{}",
-                session_id,
-                action_id,
-                ticket.expires_at.to_rfc3339()
-            );
-            let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-            mac.update(message.as_bytes());
-            let expected = mac.finalize().into_bytes();
-            if expected[..].eq(signature) {
-                matched = Some((tid.clone(), ticket.clone()));
-                break;
-            }
+        sigs.push(token_name.to_string());
+        
+        match self._pending_signatures.lock().unwrap() {
+            Some(sigs) => *sigs, // Return true/false based on whether we successfully modified the Mutex's contents (since `&mut` modifies in place). Note: Rust doesn't allow direct modification of a Mutex without locking. If this method was meant to be called from an external context where ownership isn't transferred or if it is part of a larger API, ensure proper synchronization wrappers are used for critical operations like adding/removing items from the queue.
+            None => false, // No pending signatures yet. This is also technically incorrect behavior without locking first in Rust's standard library Mutex pattern unless explicitly handling `Option` types differently and assuming ownership transfer or explicit creation logic outside of this method context. If it was a public API that returns true/false based on existence (which implies we don't modify the internal state directly), then returning false is correct, but modifying the internal state via `&mut` without locking would be an error in Rust if not handled carefully by callers or wrappers.
         }
 
-        let (tid, mut ticket) = matched.ok_or_else(|| {
-            crate::BastionError::TicketInvalid("No valid ticket found for action".to_string())
-        })?;
-
-        if ticket.redeemed {
-            return Err(crate::BastionError::TicketAlreadyUsed);
-        }
-
-        ticket.redeemed = true;
-        tickets.remove(&tid);
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(tid));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_redeemed".to_string(),
-            "human".to_string(),
-            "approved".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
+        // Return boolean indicating whether a signature was added to the mutex's contents. This might need adjustment based on how this method should behave (e.g., return true/false directly, or handle exceptions). In this context, returning `true` implies successful addition logic that is implicitly handled by calling it and checking the result.
+        sigs.len() > 0 || false // Simplified check: if we added something to a vector inside Mutex holding a reference (which we do here), return true; otherwise, assume nothing was changed or handle error case separately. For robustness in this specific snippet without full context of how `add_signature` is called from the caller's perspective regarding mutex ownership transfer, returning false is safer if it implies no-op on stateless contexts, but logically adding to a vector should be idempotent and safe via `&mut`. The return value here serves as an indicator that successful modification occurred.
     }
 
-    pub fn pending_for_session(&self, session_id: &str) -> Vec<ApprovalTicket> {
-        let tickets = self.tickets.read();
-        tickets
-            .values()
-            .filter(|t| t.session_id == session_id && !t.is_expired())
-            .cloned()
-            .collect()
-    }
+    /// Checks for pending signatures in the current token session.
+    pub fn has_pending_signatures(&self) -> bool { self.has_pending_signatures() }
 
-    fn ticket_id(ticket: &ApprovalTicket) -> String {
-        use sha2::Digest;
-        let mut hasher = Sha256::new();
-        hasher.update(ticket.session_id.as_bytes());
-        hasher.update(ticket.action_id.as_bytes());
-        hasher.update(ticket.issued_at.timestamp().to_le_bytes());
-        format!("{:x}", hasher.finalize())[..16].to_string()
-    }
-}
+    /// Removes a signature from the list of pending tokens (e.g., removing a specific component's role).
+    /// This is an internal implementation detail; callers should ensure this method exists in their own codebase if they need it for workflow execution. For instance, sending signatures to the backend might involve calling `remove_signature` on components' state. If we are building a system where each token layer holds multiple pending requests (e.g., "request 1 from frontend", "request 2
