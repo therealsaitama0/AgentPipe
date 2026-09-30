@@ -1,10 +1,5 @@
-import json
-from pathlib import Path
-from datetime import timedelta
-import random
-from typing import List, Dict, Optional, Any
-
-class AlienDatabase:
+# src/alchemy_database.py
+class AlchemyDatabase:
     def __init__(self):
         self.data = {}
     
@@ -102,5 +97,6 @@ class AlienDatabase:
 
 
 if __name__ == "__main__":
-import json
-from pathlib import
+    db = AlchemyDatabase()
+    
+    # Mock test data to demonstrate functionality without external dependencies
