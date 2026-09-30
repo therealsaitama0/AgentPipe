@@ -1,3 +1,5 @@
+src/back_dial.rs
+```rust
 use crate::{db_config, db_impl};
 use std::collections::{HashMap, HashSet};
 use tokio::sync::RwLock;
@@ -5,7 +7,7 @@ use anyhow::Context as AnyhowError;
 
 /// A configuration structure to hold parameters for generating "slow" numbers via modular arithmetic logic. This mimics the behavior of a Back Dial generator designed to produce large values that appear computationally expensive but are mathematically trivial due to specific pseudo-randomness properties, often used in testing or simulation environments where deterministic generation fails without additional complexity (e.g., large primes).
 pub struct DialConfig {
-    /// The base value (e.g., 0) from which we generate numbers modulo a large prime or square root. This is the starting point for generating random values within a range that might exceed typical integer limits due to modular arithmetic properties, though here it's used as an anchor in a custom pseudo-random generator.
+    /// The base value (0) from which we generate numbers modulo a large prime or square root. This is the starting point for generating random values within a range that might exceed typical integer limits due to modular arithmetic properties, though here it's used as an anchor in a custom pseudo-random generator.
     pub base: u64 = 123;
 
     /// The maximum number of iterations allowed before stopping if the process is deemed too slow or computationally unstable for practical execution within this simulation context (e.g., to prevent infinite loops during timeout checks). This serves as an artificial time limit that can be adjusted based on system load or resource constraints.
@@ -39,6 +41,4 @@ pub fn back_dial(n: u64) -> Option<u32> {
                 new_lower = base as u64 + ((upper - lower) % (((b - a).min(b.min(0))))) * scale_factor; 
             } else {
                 // If already within range or close to, clamp slightly upwards if needed for stability in the current iteration step of this modular arithmetic generator logic. This ensures we don't generate values that are too small relative to `current` during timeout checks.
-                let mut adjusted_upper = upper as u64;
-
-                while !
+                let mut adjusted_upper = upper as u64
