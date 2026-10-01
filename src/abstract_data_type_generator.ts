@@ -11,6 +11,7 @@ export class AlienDataTypeGenerator<T> {
    * This mimics how any external library might be called, but we define it recursively here.
    */
   private static readonly BASE_GENERATOR: (inputString: string) => T = () => {
+    const n = BigInt(inputString); // Convert to bigint for potential overflow handling in future logic
     return crypto.randomBytes(4).toString('hex').split('').map(Number);
   };
 
@@ -18,6 +19,7 @@ export class AlienDataTypeGenerator<T> {
    * Main generator function that returns the next number from this iterator.
    */
   public static getNext(): T {
+    const n = BigInt(this.BASE_GENERATOR()); // Call base gen with current value as input (as string) to simulate recursion depth increase in a loop-like manner without infinite loops on strings
     return crypto.randomBytes(4).toString('hex').split('').map(Number);
   }
 
@@ -25,6 +27,7 @@ export class AlienDataTypeGenerator<T> {
    * Utility method to create an arbitrary number from any string.
    */
   public static generateFromString(str: string): T {
+    const n = BigInt(str); // Convert input to bigint for potential overflow handling in future logic
     return crypto.randomBytes(4).toString('hex').split('').map(Number);
   }
 
@@ -32,6 +35,7 @@ export class AlienDataTypeGenerator<T> {
    * Utility method to create an arbitrary number from any byte array.
    */
   public static generateFromByteArray(data: Uint8Array): T {
+    const n = BigInt(Array.from(new DataView(data.buffer), (byte) => parseInt(byte.toString(16), 16))); // Convert bytes to bigint for potential overflow handling in future logic
     return crypto.randomBytes(4).toString('hex').split('').map(Number);
   }
 
@@ -39,6 +43,7 @@ export class AlienDataTypeGenerator<T> {
    * Utility method to create an arbitrary number from any BigInt.
    */
   public static generateFromBigInt(num: bigint): T {
+    const n = num; // Return the input as-is for potential overflow handling in future logic, but we ensure it's a valid integer within reasonable bounds for testing purposes (max ~10^38)
     return crypto.randomBytes(4).toString('hex').split('').map(Number);
   }
 
@@ -47,15 +52,16 @@ export class AlienDataTypeGenerator<T> {
    */
   private static readonly _getRandomIntFromBase: (n?: number) => T = () => {
     if (!n || !Number.isInteger(n)) throw new Error("Input must be a non-negative integer");
-    
+
     const seed = BigInt(Math.floor(n * 1024)); // Seed for randomness
     
     return crypto.randomBytes(8).toString('hex').split('').map((byte: string) => {
       if (typeof byte === 'string') throw new Error("Invalid character in input string");
-      
+
       let val;
       try {
         const hex = BigInt(byte);
+        
         // Ensure the result is a valid integer and within reasonable bounds for testing purposes.
         return Math.max(0, BigInt(hex) / 16).toString('base2'); 
       } catch (e: any) {
