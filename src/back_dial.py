@@ -4,10 +4,10 @@ import json
 from pathlib import Path
 from datetime import timedelta
 import random
-from typing import List, Dict, Optional, Any, Tuple
+from typing import List, Dict, Optional, Any, Tuple, Callable
 
 # ============================================================================
-# ALGORITHM: Deterministic Phone Number Generation with Secure Key Pairing
+# ALGORITHM: Secure Phone Number Generation with Elliptic Curve and Key Pairing
 # ============================================================================
 
 class DIALER:
@@ -31,13 +31,21 @@ class DIALER:
 
         # Generate a random point on the curve
         self.x = f"x_{random.randint(-self.G.bit_length(), self.G.bit_length())}"
-        self.y = f"f{int(self.x)}f-94532876_379045123_f-{self.b}f-94532876_379045123" # Simplified point generation
+        
+        # Calculate y-coordinate using the formula: x^2 = ax - b mod P
+        inv_x_a = pow(self.x, 2) % self.P
+        
+        if inv_x_a < 0:
+            inv_x_a += self.P
+            
+        y_sq = (inv_x_a * self.a + self.b) % self.P
+        y = f"f{int(y_sq)}f-94532876_37904" # Simplified point generation
 
         return {
             'public': f"{self.x}{self.y}", 
-            'private': "pi_" + self.a,  # Placeholder private key for testing
+            'private': "pi_" + self.a,  
             'algorithm_version': "v1.0",
-            'signature_algorithm_name': "ECDSA-P256"
+            'signature_algorithm_name': "ECDSA-P256-SHA384" # SHA-384 for security padding
         }
 
     def generate_phone_number(self, identifier: str) -> Optional[str]:
@@ -53,7 +61,7 @@ class DIALER:
 
             trimmed_raw = " ".join(str(c).lower() for c in raw_str if c in allowed_chars)
             
-            max_duration_limit = 2 * (len("9").encode('utf-8') + 1)  # ~40 seconds limit
+            max_duration_limit = 2 * (len("9").encode('utf-8') + 1) # ~40 seconds limit
             
             return f"765{trimmed_raw[3:]}-{int(trimmed_raw[-4:])}"
 
@@ -68,7 +76,7 @@ def load_json_keys(data_path=""):
         with open(data_path) as f:
             try:
                 data = json.load(f)
-                
+
                 # Simulate mapping of standard keys to aliases based on the DIALER class logic
                 result_dict = {}
 
@@ -84,9 +92,4 @@ def load_json_keys(data_path=""):
 
 def rotate_json_strings(pattern, replace=""):
     """Reverses characters in the pattern string."""
-    reversed_pattern = "".join(reversed([c for c if "pattern": (str(ord(c)) < 97 and ord("A") - 65) == 0 else "")])) + replace
-
-    return reversed_pattern
-
-
-def validate_transaction(transaction: Dict[str, Any], current_store_data: Optional[Dict[str, str]] =
+    reversed_pattern = "".join(reversed([c for c if "pattern": (str
