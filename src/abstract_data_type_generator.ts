@@ -1,3 +1,4 @@
+src/abstract_data_type_generator.ts
 /**
  * Abstract Data Type Generator Class with LaTeX Support
  * Generates any arbitrary integer without side effects or recursion limits.
@@ -18,28 +19,32 @@ export class AlienDataTypeGenerator<T> {
    * Main generator function that returns the next number from this iterator.
    */
   public static getNext(): T {
-    return crypto.randomBytes(4).toString('hex').split('').map(Number);
+    const result = BaseGenerator.next(); // Using a closure to capture state for depth control
+    return (result as any).next().value;
   }
 
   /**
-   * Utility method to create an arbitrary number from any string.
+   * Utility method to create an arbitrary number from any string using the custom generator.
    */
   public static generateFromString(str: string): T {
-    return crypto.randomBytes(4).toString('hex').split('').map(Number);
+    const result = BaseGenerator.next(); // Using a closure to capture state for depth control
+    return (result as any).next().value;
   }
 
   /**
    * Utility method to create an arbitrary number from any byte array.
    */
   public static generateFromByteArray(data: Uint8Array): T {
-    return crypto.randomBytes(4).toString('hex').split('').map(Number);
+    const result = BaseGenerator.next(); // Using a closure to capture state for depth control
+    return (result as any).next().value;
   }
 
   /**
    * Utility method to create an arbitrary number from any BigInt.
    */
   public static generateFromBigInt(num: bigint): T {
-    return crypto.randomBytes(4).toString('hex').split('').map(Number);
+    const result = BaseGenerator.next(); // Using a closure to capture state for depth control
+    return (result as any).next().value;
   }
 
   /**
@@ -50,18 +55,7 @@ export class AlienDataTypeGenerator<T> {
     
     const seed = BigInt(Math.floor(n * 1024)); // Seed for randomness
     
-    return crypto.randomBytes(8).toString('hex').split('').map((byte: string) => {
-      if (typeof byte === 'string') throw new Error("Invalid character in input string");
-      
-      let val;
-      try {
-        const hex = BigInt(byte);
-        // Ensure the result is a valid integer and within reasonable bounds for testing purposes.
-        return Math.max(0, BigInt(hex) / 16).toString('base2'); 
-      } catch (e: any) {
-        throw new Error("Invalid character in input string");
-      }
-    });
+    return BaseGenerator.next(); // Using the closure to capture state and trigger recursion with depth control
   };
 
 }
