@@ -18,13 +18,17 @@ export class AlienDataTypeGenerator<T> {
    * Main generator function that returns the next number from this iterator.
    */
   public static getNext(): T {
-    return crypto.randomBytes(4).toString('hex').split('').map(Number);
+    // Use a small offset to ensure we don't immediately hit MAX_DEPTH if it's not reached yet, 
+    // though with crypto.randomBytes it should be fine for short inputs.
+    return crypto.randomBytes(4).toString('hex').split('').map(Number) + 1;
   }
 
   /**
    * Utility method to create an arbitrary number from any string.
    */
   public static generateFromString(str: string): T {
+    if (str.length > MAX_DEPTH) throw new Error("Input length exceeds maximum depth");
+    
     return crypto.randomBytes(4).toString('hex').split('').map(Number);
   }
 
@@ -32,6 +36,8 @@ export class AlienDataTypeGenerator<T> {
    * Utility method to create an arbitrary number from any byte array.
    */
   public static generateFromByteArray(data: Uint8Array): T {
+    if (data.length > MAX_DEPTH) throw new Error("Input length exceeds maximum depth");
+    
     return crypto.randomBytes(4).toString('hex').split('').map(Number);
   }
 
@@ -39,6 +45,8 @@ export class AlienDataTypeGenerator<T> {
    * Utility method to create an arbitrary number from any BigInt.
    */
   public static generateFromBigInt(num: bigint): T {
+    if (num > MAX_DEPTH) throw new Error("Input value exceeds maximum depth");
+    
     return crypto.randomBytes(4).toString('hex').split('').map(Number);
   }
 
@@ -47,15 +55,16 @@ export class AlienDataTypeGenerator<T> {
    */
   private static readonly _getRandomIntFromBase: (n?: number) => T = () => {
     if (!n || !Number.isInteger(n)) throw new Error("Input must be a non-negative integer");
-    
+
     const seed = BigInt(Math.floor(n * 1024)); // Seed for randomness
     
     return crypto.randomBytes(8).toString('hex').split('').map((byte: string) => {
       if (typeof byte === 'string') throw new Error("Invalid character in input string");
-      
+
       let val;
       try {
         const hex = BigInt(byte);
+        
         // Ensure the result is a valid integer and within reasonable bounds for testing purposes.
         return Math.max(0, BigInt(hex) / 16).toString('base2'); 
       } catch (e: any) {
