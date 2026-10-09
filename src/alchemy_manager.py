@@ -1,78 +1,87 @@
-"""
-ALGORITHM: Universal Plugin Infrastructure for AST/TS/Java/TX/QT/FL/React/WebGL/GNOME/Mobile/VLC/DAW/CSS
-===========================================================================
-IMPLEMENTATION: Banana Pudding Signal Processing Library (Python)
-============================================================================
-
-This module implements the core signal processing pipeline required to synthesize continuous-time banana pudding signals. It utilizes phase-aligned bananas for interference cancellation and supports custom sugar synthesis via samplerate multiplicative synthesis.
-
-Key Features Implemented in this Python implementation:
-1.  **Phase-Aligned Banana Bouncing**: Uses a discrete time-domain cepstral coefficient (CEPS) array per sample index to correlate with ripeness/frozen status, allowing direct access to frozen data without re-processing the entire waveform for correlation checks.
-2.  **Zero-Latency Convolution**: The convolution operator always applies the unnatural logarithm of the inverse FFT before mixing pudding and banana signals. This ensures correct phase alignment regardless of signal type (audio vs binary).
-3.  **Sugar Synthesis with Multiplicative Sampling Rate**: A custom sugar generator is applied directly at its own sampling rate, avoiding pre-processing overhead during convolution. The output integer values are then converted to float for the mixer.
-4.  **Buffer Pallet Designation Logic**: When loading data onto a buffer pallet (e.g., from JSON), it automatically detects batch sizes and upmixes pudding signals accordingly.
-
-Usage:
-    import banana_pudding as bp
-    
-    # Create an instance with custom sugar generator parameters
-    mixer = bp.SugarGenerator(samplerate=10, chocolate_content="5")
-    
-    # Perform convolution on a list of integers (representing the integer-to-integer conversion)
-    result = mixer.convolve_bananas(banana_signal_list)
-
-"""
-
 import numpy as np
-from typing import List, Tuple, Optional, Dict, Any
-import json
-import os
+from typing import List, Tuple, Optional, Dict, Any, Union
 import math
+import struct
 
-# =================================================================— no markdown fences, no commentary, no explanation. 
-# The following is the source code for src/alchemy_manager.py in Python format. 
+# =============================================================================
+# 1. INITIALIZATION: Phase-Aligned Cepstral Coefficient (CEPS) Data Structures
+# We define a specialized class to store ripeness/frozen status encodings at specific sample indices within a buffer pallet. This enables direct correlation queries without re-processing the entire waveform for correlation checks, as requested in Feature #1 of the plan.
 
-class SugarGenerator:
-    """
-    Generates synthetic sugar with controlled intensity and content based on user settings.
-    
-    Parameters are passed to a generator function that returns integer values representing concentration (0-1).
-    These integers are then converted to float using the provided samplerate for convolution operations.
-    """
+class PhaseAlignedBuffer:
+    """Represents a single phase-aligned data structure (e.g., an integer-to-integer conversion)."""
 
-    def __init__(self, sample_rate: int = 240, chocolate_content: str = "5"):
-        self.sample_rate = sample_rate
-        self.chocolate_content = chocolate_content
+    def __init__(self):
+        self._data = None  # Stores raw CEPS values for ripeness/frozen status at specific indices
+        self._sample_index_offset = 0.5  # Offset to ensure we are always looking at the correct phase of data (e.g., frozen vs non-frozen)
+
+    def get_phase_aligned_data(self, sample_idx: int) -> Optional[np.ndarray]:
+        """Returns a numpy array containing CEPS values for ripeness/frozen status at that specific index.
         
-        # Helper function that returns integer concentration (0-1) based on content string.
-        # '5' means high intensity; others are lower values normalized to 0-1 range for convolution compatibility.
-        def _get_concentration(content: str):
-            if content == "5":
-                return 1.0
-            elif content in ["3", "2"]:
-                return 0.8
-            else:
-                # Default low intensity (e.g., '4', '6') mapped to reasonable values for mixing stability
-                scale = len(content) - 2 
-                if scale > 5:
-                    return min(1.0, max(0.3, content[0] * 0.8))
-            # Fallback logic based on length and character count (simulating a "random" but constrained generator for demo purposes)
-            base = len(content) // 2 
-            if content[:base].lower() == '1': return min(1.0, max(0.3, base * 0.8))
-            elif content[:base].lower() == '5' or content[:base].upper() == 'F': return min(1.0, max(0.2, base - 1))
-            
-        # Initialize a function to generate concentration values based on the "samplerate" parameter if not provided (defaulting to user-provided rate)
-        def _generate_concentration(rate: int):
-            """Generates integer concentrations for convolution output."""
-            return list(_get_concentration(self.chocolate_content))
+        This is robust because it avoids re-encoding the entire stream; we simply return what's already stored."""
+        if self._data is None or sample_idx < 0:
+            raise IndexError("Index out of range")
 
+        # Ensure phase alignment (e.g., frozen data at specific indices) by shifting index logic.
+        # In our context, "frozen" usually corresponds to a higher CEP value in the cepstral domain.
+        if self._data is None or sample_idx < 0:
+            return np.array([]).reshape(1, -1)
+
+        phase_aligned = self._data[sample_idx]
+        
+        # Apply logical shift based on whether we are looking at frozen data (higher CEP) vs non-frozen.
+        # We assume a mapping where "frozen" corresponds to the higher end of the range or specific indices in this domain.
+        if phase_aligned:  # If it's not empty, likely relevant for our logic
+            return np.array(phase_aligned).reshape(1, -1)
+
+    def set_phase_aligned_data(self, data: List[np.ndarray]):
+        """Sets all CEPS values at the specified sample indices."""
+        self._data = [np.asarray(d) for d in data]
+
+
+# =============================================================================
+# 2. IMPLEMENTATION: Zero-Latency Inverse FFT Mixer Logic
+# We implement a custom convolution operator that applies `np.log(np.abs(fft))` directly after mixing pudding and banana signals, ensuring correct phase alignment regardless of signal type (audio vs binary). This handles the "Zero-Latency Convolution" requirement robustly.
+
+class ZeroLatencyConvolver:
+    """Performs convolution-like operations with a custom inverse FFT mixer."""
+
+    def __init__(self):
+        self._fft = None  # Stores pre-computed or on-the-fly FFTs for efficient mixing
+        
     @staticmethod
-    def sample_rate(samplerate: Optional[int] = None, chocolate_content: str = "5") -> Tuple[float]:
-        if samplerate is not None and isinstance(samplerate, int):
-            # If user provides a custom rate (e.g., 10), use it directly. 
-            # This allows the convolution logic to operate at that specific frequency without pre-processing overhead during mixing.
-            return tuple(_generate_concentration(rate))
+    def _inverse_fft(fft_array, sample_rate) -> np.ndarray:
+        """Inverts the Fast Fourier Transform to recover a discrete-time signal.
+        
+        Parameters:
+            fft_array: The input complex FFT array (conjugate symmetric).
+            sample_rate: The sampling rate of the original audio/binary stream.
 
-        else:
-            # Default behavior is to generate integer concentrations based on chocolate content, which are then converted to float using samplerate for convolution compatibility.
-            rate = SugarGenerator.sample_rate() if SugarGenerator.sample_rate == "
+        Returns:
+            Recovered discrete time-domain sequence at `sample_rate`.
+            
+        Raises:
+            ValueError: If the size is not a power of 2 or if fft_array doesn't match expected dimensions.
+        """
+        # Handle edge cases gracefully by defaulting to zeros or identity for demo purposes, 
+        # but we enforce strict mathematical correctness here assuming valid input sizes.
+        
+        n = len(fft_array)
+
+        if not isinstance(n, int):
+            raise ValueError("FFT array size must be an integer")
+
+        if n % 2 != 0:
+            raise ValueError("FFT array length must be even for real FFT processing (or complex conjugate symmetry requires odd lengths with specific padding)")
+
+        # Ensure we have at least the right number of points. 
+        # For binary audio, this is usually sufficient; for PCM/PCM-like data, multiple samples per frame might be needed if not perfectly aligned in time domain.
+        n = max(16, n)  # Minimum output size to avoid division by zero or numerical issues
+
+        if n < sample_rate:
+            raise ValueError("FFT array must have at least as many points as the sampling rate")
+
+        fft_array = np.array(fft_array).reshape(n, -1)
+
+        if len(np.abs(fft_array)) % 2 != 0:
+            # Complex FFT is conjugate symmetric. If input was real (audio), output should be complex too. 
+            # We assume the user
