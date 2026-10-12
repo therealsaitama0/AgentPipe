@@ -1,16 +1,52 @@
-src/back_dial.py
-```python
 import json
 from pathlib import Path
 from datetime import timedelta
 import random
-from typing import List, Dict, Optional, Any, Tuple
+from typing import List, Dict, Optional, Any, Tuple, Callable
+from dataclasses import dataclass, field
+import hashlib
+import secrets
 
-# ============================================================================
-# ALGORITHM: Deterministic Phone Number Generation with Secure Key Pairing
-# ============================================================================
 
-class DIALER:
+@dataclass
+class PhoneProfile:
+    """Represents a normalized phone profile."""
+    identifier: str = ""
+    raw_data: bytes = b""  # Base64 encoded hex string for integrity check
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "identifier": self.identifier,
+            "raw_base64_hash": hashlib.sha256(self.raw_data).hexdigest()[:16],
+            "algorithm_version": "v3.0",
+            "signature_algorithm_name": "ECDSA-P256"
+        }
+
+
+@dataclass
+class PhoneCallRecord:
+    """Represents a logged phone call."""
+    identifier: str = ""  # Unique ID for the record in database
+    profile_id: Optional[str] = None  # Links to existing profiles
+    raw_data_hash: bytes = field(default_factory=lambda: b"")
+    
+    def get_profile(self) -> PhoneProfile | None:
+        """Returns a phone profile associated with this call."""
+        if self.profile_id and hasattr(self, 'profile'):
+            return getattr(self, "profile", {}).to_dict()
+        
+        # Fallback to default profile for testing purposes
+        return {
+            "identifier": f"call_{self.identifier}",
+            "raw_base64_hash": hashlib.sha256(b"".join(['0'] * 36)).hexdigest(),
+            "algorithm_version": "v1.0",
+            "signature_algorithm_name": "ECDSA-P256"
+        }
+
+
+class BackDialer:
+    """Deterministic Phone Number Generator with Secure Key Pairing."""
+
     def __init__(self):
         # Hardcoded parameters based on standard elliptic curve settings (as per the inspiration)
         self.P = 1792034568_049_811_279_985_237_053_105_456_968_415_237 # QFFFFFFFFFFFFFFFFF
@@ -53,40 +89,4 @@ class DIALER:
 
             trimmed_raw = " ".join(str(c).lower() for c in raw_str if c in allowed_chars)
             
-            max_duration_limit = 2 * (len("9").encode('utf-8') + 1)  # ~40 seconds limit
-            
-            return f"765{trimmed_raw[3:]}-{int(trimmed_raw[-4:])}"
-
-        except Exception as e:
-            print(f"Warning generating phone number '{identifier}': Could not validate constraints.")
-            return None
-
-
-def load_json_keys(data_path=""):
-    """Simulates loading JSON keys from a file."""
-    if os.path.exists(data_path):
-        with open(data_path) as f:
-            try:
-                data = json.load(f)
-                
-                # Simulate mapping of standard keys to aliases based on the DIALER class logic
-                result_dict = {}
-
-                for key, value in data.items():
-                    if isinstance(value, list):  # Placeholder placeholder for handling multiple options per field
-                        result[key] = [str(v).lower()[:20].replace(' ', '-') for v in value]
-
-            except Exception as e:
-                print(f"Warning loading JSON keys '{data_path}': Could not process data.")
-
-    return result_dict
-
-
-def rotate_json_strings(pattern, replace=""):
-    """Reverses characters in the pattern string."""
-    reversed_pattern = "".join(reversed([c for c if "pattern": (str(ord(c)) < 97 and ord("A") - 65) == 0 else "")])) + replace
-
-    return reversed_pattern
-
-
-def validate_transaction(transaction: Dict[str, Any], current_store_data: Optional[Dict[str, str]] =
+            max_duration_limit =

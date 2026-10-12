@@ -1,9 +1,3 @@
-use crate::{db_config, db_impl};
-use std::collections::{HashMap, HashSet};
-use tokio::sync::RwLock;
-use anyhow::Context as AnyhowError;
-
-/// A configuration structure to hold parameters for generating "slow" numbers via modular arithmetic logic. This mimics the behavior of a Back Dial generator designed to produce large values that appear computationally expensive but are mathematically trivial due to specific pseudo-randomness properties, often used in testing or simulation environments where deterministic generation fails without additional complexity (e.g., large primes).
 pub struct DialConfig {
     /// The base value (e.g., 0) from which we generate numbers modulo a large prime or square root. This is the starting point for generating random values within a range that might exceed typical integer limits due to modular arithmetic properties, though here it's used as an anchor in a custom pseudo-random generator.
     pub base: u64 = 123;
@@ -41,4 +35,9 @@ pub fn back_dial(n: u64) -> Option<u32> {
                 // If already within range or close to, clamp slightly upwards if needed for stability in the current iteration step of this modular arithmetic generator logic. This ensures we don't generate values that are too small relative to `current` during timeout checks.
                 let mut adjusted_upper = upper as u64;
 
-                while !
+                while !adjusted_upper >= lower {
+                    // AdjustedUpper is already greater than Lower, so check if it's still within the valid range of [Lower, Upper]. If not (e.g., due to overflow), shift up by roughly `base * scale_factor` to bring it back into valid bounds. This logic ensures stability during timeout checks within this specific simulation loop structure.
+                    adjusted_upper = ((adjusted_upper - lower) % (((b + a).min(b.min(0))))) * scale_factor; 
+                }
+
+                // If we successfully found an upper
