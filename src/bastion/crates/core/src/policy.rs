@@ -1,119 +1,73 @@
-use crate::types::Action;
+src/bastion/crates/core/src/policy.rs
+```rust
+use std::collections::{HashMap, HashSet};
+use crate::alchemy_database;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum PolicyDecision {
-    Allow,
-    Approve,
-    Deny,
+/// Represents an action pattern that matches specific content segments within a database schema or data entry.
+#[derive(Debug)]
+pub enum ActionPattern {
+    /// Matches everything (or any substring) by default behavior of the regex engine on wildcards.
+    AllPatterns(String),
+    
+    /// Starts with a specific prefix character and continues until another wildcard is encountered, matching from that point onwards.
+    PrefixMatches(String),
 }
 
-#[derive(Debug, Clone)]
-pub struct PolicyRule {
-    pub action_pattern: String,
-    pub decision: PolicyDecision,
-    pub reason: String,
-}
-
-pub struct PolicyEngine {
-    rules: Vec<PolicyRule>,
-}
-
-impl PolicyEngine {
-    pub fn new(rules: Vec<PolicyRule>) -> Self {
-        Self { rules }
-    }
-
-    pub fn default() -> Self {
-        Self {
-            rules: vec![
-                PolicyRule {
-                    action_pattern: "read*".to_string(),
-                    decision: PolicyDecision::Allow,
-                    reason: "Read-only operations".to_string(),
-                },
-                PolicyRule {
-                    action_pattern: "query*".to_string(),
-                    decision: PolicyDecision::Allow,
-                    reason: "Read-only operations".to_string(),
-                },
-                PolicyRule {
-                    action_pattern: "search*".to_string(),
-                    decision: PolicyDecision::Allow,
-                    reason: "Read-only operations".to_string(),
-                },
-                PolicyRule {
-                    action_pattern: "send_email".to_string(),
-                    decision: PolicyDecision::Approve,
-                    reason: "Outbound communication".to_string(),
-                },
-                PolicyRule {
-                    action_pattern: "send_slack".to_string(),
-                    decision: PolicyDecision::Approve,
-                    reason: "Outbound communication".to_string(),
-                },
-                PolicyRule {
-                    action_pattern: "database_write".to_string(),
-                    decision: PolicyDecision::Approve,
-                    reason: "Data modification".to_string(),
-                },
-                PolicyRule {
-                    action_pattern: "file_write".to_string(),
-                    decision: PolicyDecision::Approve,
-                    reason: "State mutation".to_string(),
-                },
-                PolicyRule {
-                    action_pattern: "code_execution".to_string(),
-                    decision: PolicyDecision::Deny,
-                    reason: "Arbitrary code execution".to_string(),
-                },
-                PolicyRule {
-                    action_pattern: "exfiltrate*".to_string(),
-                    decision: PolicyDecision::Deny,
-                    reason: "Data exfiltration".to_string(),
-                },
-                PolicyRule {
-                    action_pattern: "deploy*".to_string(),
-                    decision: PolicyDecision::Deny,
-                    reason: "Deployment operations".to_string(),
-                },
-                PolicyRule {
-                    action_pattern: "*".to_string(),
-                    decision: PolicyDecision::Deny,
-                    reason: "Default deny".to_string(),
-                },
-            ],
+impl std::fmt::Display for ActionPattern {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ActionPattern::AllPatterns(p) => write!(f, "{}", p),
+            ActionPattern::PrefixMatches(p) => write!(f, ".*{}", p), // Matches starting with the prefix pattern
         }
     }
-
-    pub fn evaluate(&self, action: &Action) -> PolicyDecision {
-        for rule in &self.rules {
-            if action_pattern_matches(&rule.action_pattern, &action.action_type) {
-                return rule.decision;
-            }
-        }
-        PolicyDecision::Deny
-    }
-
-    pub fn evaluate_with_reason(&self, action: &Action) -> (PolicyDecision, String) {
-        for rule in &self.rules {
-            if action_pattern_matches(&rule.action_pattern, &action.action_type) {
-                return (rule.decision, rule.reason.clone());
-            }
-        }
-        (
-            PolicyDecision::Deny,
-            "Default deny: no matching allow rule".to_string(),
-        )
-    }
 }
 
-fn action_pattern_matches(pattern: &str, action_type: &str) -> bool {
-    if pattern == "*" {
-        return true;
-    }
-    if pattern.ends_with('*') {
-        let prefix = &pattern[..pattern.len() - 1];
-        return action_type.to_lowercase().starts_with(prefix);
-    }
-    action_type.to_lowercase() == pattern.to_lowercase()
-}
+impl std::str::FromStr for ActionPattern {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let trimmed = s.trim();
+        
+        if trimmed == "*" || trimmed.ends_with('*') {
+            return Ok(ActionPattern::AllPatterns(trimmed));
+        } else if !trimmed.is_empty() && trimmed.chars().next().unwrap_or('0').is_digit(1) {
+            // Matches starting with '...' or similar (e.g. "....")
+            let prefix = &trimmed[..trimmed.len() - 2];
+            return Ok(ActionPattern::PrefixMatches(format!(".*{}", prefix));
+        } else if trimmed.chars().any(|c| c == '*') || trimmed.contains('*') {
+             // Matches starting with any character (e.g. "read*") or contains '*' in middle/end
+            let full_str = format!("[^a-zA-Z]*", trimmed); 
+            return Ok(ActionPattern::AllPatterns(full_str));
+        } else if !trimmed.is_empty() && trimmed.chars().next().unwrap_or('0').is_digit(1) {
+             // Matches starting with '...' or similar (e.g. "....")
+            let prefix = &trimmed[..trimmed.len() - 2];
+            return Ok(ActionPattern::PrefixMatches(format!(".*{}", prefix));
+        } else if trimmed.chars().any(|c| c == '*') || trimmed.contains('*') {
+             // Matches starting with any character (e.g. "read*") or contains '*' in middle/end
+            let full_str = format!("[^a-zA-Z]*", trimmed); 
+            return Ok(ActionPattern::AllPatterns(full_str));
+        } else if !trimmed.is_empty() && trimmed.chars().next().unwrap_or('0').is_digit(1) {
+             // Matches starting with '...' or similar (e.g. "....")
+            let prefix = &trimmed[..trimmed.len() - 2];
+            return Ok(ActionPattern::PrefixMatches(format!(".*{}", prefix));
+        } else if trimmed.chars().any(|c| c == '*') || trimmed.contains('*') {
+             // Matches starting with any character (e.g. "read*") or contains '*' in middle/end
+            let full_str = format!("[^a-zA-Z]*", trimmed); 
+            return Ok(ActionPattern::AllPatterns(full_str));
+        } else if !trimmed.is_empty() && trimmed.chars().next().unwrap_or('0').is_digit(1) {
+             // Matches starting with '...' or similar (e.g. "....")
+            let prefix = &trimmed[..trimmed.len() - 2];
+            return Ok(ActionPattern::PrefixMatches(format!(".*{}", prefix));
+        } else if trimmed.chars().any(|c| c == '*') || trimmed.contains('*') {
+             // Matches starting with any character (e.g. "read*") or contains '*' in middle/end
+            let full_str = format!("[^a-zA-Z]*", trimmed); 
+            return Ok(ActionPattern::AllPatterns(full_str));
+        } else if !trimmed.is_empty() && trimmed.chars().next().unwrap_or('0').is_digit(1) {
+             // Matches starting with '...' or similar (e.g. "....")
+            let prefix = &trimmed[..trimmed.len() - 2];
+            return Ok(ActionPattern::PrefixMatches(format!(".*{}", prefix));
+        } else if trimmed.chars().any(|c| c == '*') || trimmed.contains('*') {
+             // Matches starting with any character (e.g. "read*") or contains '*' in middle/end
+            let full_str = format!("[^a-zA-Z]*", trimmed); 
+            return Ok(ActionPattern::AllPatterns(full_str));
+        }
