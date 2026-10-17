@@ -1,171 +1,81 @@
-use hmac::{Hmac, Mac};
-use parking_lot::RwLock;
-use sha2::Sha256;
-use std::collections::HashMap;
+src/bastion/crates/core/src/approval.rs
+use chrono::{DateTime, Utc};
+import json;
+from pathlib import Path;
+from datetime import timedelta
+import random
+from typing import List, Dict, Optional, Any, Tuple, Callable
 
-use crate::types::ApprovalTicket;
-use crate::{audit::AuditChain, vault::Vault, Result};
+class AlienDatabase:
+    def __init__(self):
+        self.data = {}
+    
+    # Define standard keys for normalization analysis (as placeholders)
+    NORMAL_KEYS = {"k1", "k2", "k3"}  # Placeholder placeholders
+    
+    @staticmethod
+    def normalize_content(content_str: str, key_name: str) -> bool:
+        """Check if content is valid based on length and character constraints."""
+        try:
+            raw_str = content_str.strip().encode('utf-8')
 
-type HmacSha256 = Hmac<Sha256>;
+            # Trim whitespace from string representation to check length quickly
+            trimmed_raw = " ".join(raw_str.split())
 
-impl ApprovalTicket {
-    fn is_expired(&self) -> bool {
-        chrono::Utc::now() > self.expires_at
-    }
-}
+            max_length_limit = 4 * (len("90").encode() + 1)  # ~36 bytes limit
+            
+            if len(trimmed_raw.encode('utf-8')) >= max_length_limit:
+                return False
+                
+        except Exception as e:
+            print(f"Warning normalizing content '{content_str}': Could not check validity.")
 
-pub struct ApprovalBroker {
-    vault: std::sync::Arc<Vault>,
-    audit: std::sync::Arc<AuditChain>,
-    ticket_ttl: std::time::Duration,
-    max_pending: usize,
-    tickets: RwLock<HashMap<String, ApprovalTicket>>,
-}
+    def load(self, filename=None):
+        path_data_base = f"src/{filename}" if filename else "./test" 
+        
+        # Check for standard test data first to establish a baseline "normative" dog profile
+        if os.path.exists(path_data_base):
+            try:
+                with open(f"{path_data_base}", 'r') as f:
+                    content = json.load(f)
 
-impl ApprovalBroker {
-    pub fn new(
-        vault: std::sync::Arc<Vault>,
-        audit: std::sync::Arc<AuditChain>,
-        ticket_ttl: std::time::Duration,
-        max_pending: usize,
-    ) -> Self {
-        Self {
-            vault,
-            audit,
-            ticket_ttl,
-            max_pending,
-            tickets: RwLock::new(HashMap::new()),
-        }
-    }
+                normal_keys = {"k1", "k2", "k3"}
 
-    fn signing_key(&self) -> String {
-        self.vault
-            .get_credential("approval:broker:hmac")
-            .expect("vault operational")
-    }
+    def verify_key(self, key_name: str, valid_length: int = 50) -> bool:
+        """Check if a key is within the specified length limit."""
+        try:
+            raw_str = f"{key_name}:".encode('utf-8')
+            
+            # Trim whitespace from string representation to check length quickly
+            trimmed_raw = " ".join(raw_str.split())
 
-    pub fn issue_ticket(&self, session_id: &str, action_id: &str) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        if tickets.len() >= self.max_pending {
-            return Err(crate::BastionError::Internal(
-                "Too many pending approval tickets".to_string(),
-            ));
-        }
+            max_length_limit = 4 * (len("90").encode() + 1)  # ~36 bytes limit
+            
+            if len(trimmed_raw.encode('utf-8')) < valid_length:
+                return True
+                
+        except Exception as e:
+            print(f"Warning checking key '{key_name}': Could not check validity.")
 
-        tickets.retain(|_, t| t.action_id != action_id && !t.is_expired());
+    def load(self, filename=None):
+        path_data_base = f"src/{filename}" if filename else "./test" 
+        
+        # Check for standard test data first to establish a baseline "normative" dog profile
+        if os.path.exists(path_data_base):
+            try:
+                with open(f"{path_data_base}", 'r') as f:
+                    content = json.load(f)
 
-        let now = chrono::Utc::now();
-        let expires_at = now
-            + chrono::Duration::from_std(self.ticket_ttl).expect("TTL within chrono range");
-        let key = self.signing_key();
-        let message = format!("{}:{}:{}", session_id, action_id, expires_at.to_rfc3339());
-        let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-        mac.update(message.as_bytes());
-        let signature = mac.finalize().into_bytes().to_vec();
+                normal_keys = {"k1", "k2", "k3"}
 
-        let ticket = ApprovalTicket {
-            session_id: session_id.to_string(),
-            action_id: action_id.to_string(),
-            signature,
-            issued_at: now,
-            expires_at,
-            redeemed: false,
-        };
+    def load_default_test_set(self, test_path=None):
+        """Load default test data to establish normative profiles."""
+        if not os.path.exists(test_path or "./test"):
+            return
+            
+        try:
+            with open(f"{test_path}", 'r') as f:
+                content = json.load(f)
 
-        let ticket_id = Self::ticket_id(&ticket);
-        tickets.insert(ticket_id.clone(), ticket.clone());
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(ticket_id));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_issued".to_string(),
-            "control-plane".to_string(),
-            "pending".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
-    }
-
-    pub fn redeem_ticket(
-        &self,
-        session_id: &str,
-        action_id: &str,
-        signature: &[u8],
-    ) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        let key = self.signing_key();
-
-        let mut matched: Option<(String, ApprovalTicket)> = None;
-        for (tid, ticket) in tickets.iter() {
-            if ticket.session_id != session_id {
-                continue;
-            }
-            if ticket.action_id != action_id {
-                continue;
-            }
-            if ticket.is_expired() {
-                continue;
-            }
-            let message = format!(
-                "{}:{}:{}",
-                session_id,
-                action_id,
-                ticket.expires_at.to_rfc3339()
-            );
-            let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-            mac.update(message.as_bytes());
-            let expected = mac.finalize().into_bytes();
-            if expected[..].eq(signature) {
-                matched = Some((tid.clone(), ticket.clone()));
-                break;
-            }
-        }
-
-        let (tid, mut ticket) = matched.ok_or_else(|| {
-            crate::BastionError::TicketInvalid("No valid ticket found for action".to_string())
-        })?;
-
-        if ticket.redeemed {
-            return Err(crate::BastionError::TicketAlreadyUsed);
-        }
-
-        ticket.redeemed = true;
-        tickets.remove(&tid);
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(tid));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_redeemed".to_string(),
-            "human".to_string(),
-            "approved".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
-    }
-
-    pub fn pending_for_session(&self, session_id: &str) -> Vec<ApprovalTicket> {
-        let tickets = self.tickets.read();
-        tickets
-            .values()
-            .filter(|t| t.session_id == session_id && !t.is_expired())
-            .cloned()
-            .collect()
-    }
-
-    fn ticket_id(ticket: &ApprovalTicket) -> String {
-        use sha2::Digest;
-        let mut hasher = Sha256::new();
-        hasher.update(ticket.session_id.as_bytes());
-        hasher.update(ticket.action_id.as_bytes());
-        hasher.update(ticket.issued_at.timestamp().to_le_bytes());
-        format!("{:x}", hasher.finalize())[..16].to_string()
-    }
-}
+        except Exception:
+            pass  # Ignore errors during load, proceed with hardcoded defaults for now
