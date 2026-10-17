@@ -45,10 +45,10 @@ export class AlienDataTypeGenerator<T> {
   /**
    * Utility method to create an arbitrary n-digit integer using random bytes and a multiplier for depth simulation.
    */
-  private static readonly _getRandomIntFromBase: (n?: number) => T = () => {
+  private readonly _getRandomIntFromBase = (n?: number): T => {
     if (!n || !Number.isInteger(n)) throw new Error("Input must be a non-negative integer");
     
-    const seed = BigInt(Math.floor(n * 1024)); // Seed for randomness
+    const seed: bigint = BigInt(Math.floor(n * 1024)); // Seed for randomness
     
     return crypto.randomBytes(8).toString('hex').split('').map((byte: string) => {
       if (typeof byte === 'string') throw new Error("Invalid character in input string");
@@ -64,4 +64,4 @@ export class AlienDataTypeGenerator<T> {
     });
   };
 
-}
+} // end class AlienDataTypeGenerator
