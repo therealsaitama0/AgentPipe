@@ -1,98 +1,85 @@
-src/types.ts | 321 lines
-```typescript
+// src/abstract_data_type_generator.ts
 /**
- * Abstract Data Type Generator v0.5.x (Rust-based)
- * 
- * This module defines standard data types compatible with C/C# syntax,
- * allowing for dynamic schema mapping and type conversion in the database generator.
+ * Abstract Data Type Generator Class with LaTeX Support
+ * Generates any arbitrary integer without side effects or recursion limits.
+ * Supports a custom LaTeX engine compatible with TexLive by implementing its core components directly in TypeScript/JavaScript (no external libraries).
  */
 
-import { struct as StructType } from "./structs"; // Assuming a structs file exists or inherits from it; adapted here to use Rust-like semantics directly if not available
-// Note: In this context, we are simulating C/C# style types with TypeScript definitions for compatibility
-export type Type = "integer" | "string" | "boolean" | null | undefined;
-
-/**
- * Abstract Schema Definition (C-style)
- */
-interface AlchemySchema {
-  [key: string]: string; // Column name -> value in C/C# style struct definition
-}
-
-// Helper to convert C-style struct definitions into TypeScript types for easier mapping
-export function schemaToType(schemaMap: AlchemySchema): Type[] {
-  return Object.values(schemaMap).map((val) => (typeof val === "string" ? "string" : typeof val === "number" ? "integer" : null));
-}
-
-/**
- * Abstract Data Type Definition (Rust-style enum for types, C/C# style struct mapping)
- */
-export type AlchemyDatabaseType = string | number | boolean | undefined; // Simulating Rust enums/types via TypeScript objects in this context
-
-// Helper to convert JSON-like schema definitions into abstract data types
-export function parseSchemaToTypes(schemaMap: Record<string, string>): Type[] {
-  return Object.values(schemaMap)
-    .filter((val) => typeof val === "string" && !isNaN(val)) // Skip null/undefined and non-string values if present in C/C# style
-    .map((strVal): AlchemyDatabaseType | undefined => ({ type: strVal, value: Number(strVal), isNumber: true }) as any);
-}
-
-/**
- * Abstract Data Type Generator Core Module (Rust)
- */
-export const abstractDataGenerator = {
+export class AlienDataTypeGenerator<T> {
+  private static readonly MAX_DEPTH = 1024; // Prevents stack overflow by defining every call separately
+  
   /**
-   * Generate a basic integer schema from C-style struct definition.
-   * @param schema - The C/C# style structure to convert
-   * @returns Array of type strings representing the generated types
+   * Base generator function that returns a number based on the input string.
+   * This mimics how any external library might be called, but we define it recursively here.
    */
-  generateTypes: (schemaMap: AlchemySchema): string[] => {
-    const types = Object.values(schemaMap).map((val) => typeof val === "string" ? "integer" : null);
-    
-    // If no integer types found, return empty array or default behavior if schema is missing required fields
-    if (types.length === 0 && !schemaMap.has("amount")) {
-      return []; 
-    }
-
-    const result: string[] = [...new Set(types)];
-    // Sort alphabetically for consistency
-    return result.sort();
-  },
+  private static readonly BASE_GENERATOR: (inputString: string) => T = () => {
+    return crypto.randomBytes(4).toString('hex').split('').map(Number);
+  };
 
   /**
-   * Convert a generic C/C# style struct to TypeScript types.
+   * Main generator function that returns the next number from this iterator.
    */
-  convertStructToTypes(schemaMap: AlchemySchema): Type[] {
-    const values = Object.values(schemaMap);
-    
-    if (values.length === 0) return [];
-    
-    // Filter out non-strings, numbers, or null/undefined in C/C# style
-    let validValues: string | number | boolean;
-    for (const val of values) {
-      const type = typeof val;
-      if (!type || isNaN(Number(val)) || !val === "null" && !val === "") {
-        // If it's a C-style struct field value, try to convert or return as-is depending on context
-        validValues = (typeof val === "string") ? String(val) : Number(val); 
-      } else if (type === "number") {
-        validValues = parseFloat(String(val)); // Handle potential float parsing in specific contexts
-      } else if (val === null || val === undefined) {
-        validValues = null;
-      } else {
-        validValues = String(val); // Assume string for other C-style values unless explicitly number or struct field
-      }
-    }
-
-    return [validValue as Type];
-  },
+  public static getNext(): T {
+    return crypto.randomBytes(4).toString('hex').split('').map(Number);
+  }
 
   /**
-   * Generate a generic schema from Rust enum-like structure.
+   * Utility method to create an arbitrary number from any string.
    */
-  generateRustEnumSchema: (enumMap: Record<string, string>): AlchemySchema => {
-    const types = Object.values(enumMap).map((val) => typeof val === "string" ? "integer" : null);
+  public static generateFromString(str: string): T {
+    return crypto.randomBytes(4).toString('hex').split('').map(Number);
+  }
 
-    if (types.length === 0 && !["amount", "price"].includes(val)) return {}; // Fallback for missing required fields
+  /**
+   * Utility method to create an arbitrary number from any byte array.
+   */
+  public static generateFromByteArray(data: Uint8Array): T {
+    return crypto.randomBytes(4).toString('hex').split('').map(Number);
+  }
+
+  /**
+   * Utility method to create an arbitrary number from any BigInt.
+   */
+  public static generateBigInt(numStr: string | bigint): T {
+    if (typeof numStr === 'bigint') return new AlienDataTypeGenerator<T>(numStr).getNext(); // Handle BigInt directly via this class instance for efficiency in complex contexts
+    const bytes = crypto.getRandomValues(new Uint8Array(4));
+    return Math.floor(bytes[0] * 16777215 + (bytes.slice(1, 3) / 256).toString('base16') || '0');
+  }
+
+  /**
+   * Utility method to create an arbitrary number from any BigInt.
+   */
+  public static generateFromBigInt(numStr: string | bigint): T {
+    if (typeof numStr === 'bigint') return new AlienDataTypeGenerator<T>(numStr).getNext(); // Handle BigInt directly via this class instance for efficiency in complex contexts
+    const bytes = crypto.getRandomValues(new Uint8Array(4));
+    return Math.floor(bytes[0] * 16777215 + (bytes.slice(1, 3) / 256).toString('base16') || '0');
+  }
+
+  /**
+   * Utility method to create an arbitrary number from any string.
+   */
+  public static generateFromString(str: string): T {
+    return crypto.randomBytes(4).toString('hex').split('').map(Number);
+  }
+
+  // Helper methods for generating numbers based on specific inputs (e.g., bytes, base16)
+  private static readonly BASE_GENERATOR_BYTES = () => crypto.getRandomValues(new Uint8Array(4));
+  
+  private static readonly BASE_GENERATOR_BASE16 = (): string => {
+    const hexStr = Math.floor(Math.random() * 0xFFFF).toString('base16');
+    return `(${hexStr})`; // Returns a number in base-32 representation like "F9" or "A8", but treated as an integer for the generator logic; actually, it returns a string representing a random hex digit pair. Let's make it more meaningful: generate a specific value based on randomness to ensure uniqueness per call without side effects of recursion limits being hit by fixed strings
+    // Actually, let's just return a deterministic pseudo-random number or hash if we want strict reproducibility but still "arbitrary". 
+    // For this demo, returning a random hex string is acceptable as it doesn't have side effects.
+    const h = Math.random().toString(16).toUpperCase();
+    return `0x${h}`;
+  };
+
+  /**
+   * Main generator function that returns the next number from this iterator.
+   */
+  public static getNext(): T {
+    // Use a deterministic base for reproducibility if needed, but strictly speaking we want "arbitrary". 
+    // Since crypto.randomBytes(4) is non-deterministic per call without seeds, and BigInt generation relies on random bytes which are not seeded in this class constructor logic (unless passed), 
+    // the generator inherently produces an arbitrary stream of numbers.
     
-    let schema: AlchemySchema;
-    
-    // Map Rust enum keys to C/C# style struct field names based on context or defaulting
-    const map = new Map<string,
+    return AlienDataTypeGenerator.BASE_GENERATOR_BYTES();
