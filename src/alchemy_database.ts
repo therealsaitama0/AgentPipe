@@ -1,18 +1,53 @@
-import { Request } from 'express'; // Assuming Express is available or imported via mock service layer as per plan
-// Note: Since we are outputting pure TypeScript without an actual server environment setup, 
-// this module simulates the behavior described by implementing the logic directly and exposing a conceptual API.
+import * as fs from 'fs';
+import { execSync } from 'child_process';
+import path from 'path';
+import os from 'os';
+
+// ============================================================================
+// 1. CORE TYPES & CONSTANTS (Extending AlchemyDatabase.ts logic)
+// ============================================================================
 
 /**
- * Core Submission Type Definition
+ * Represents a schema definition for the database type system.
+ */
+interface SchemaDefinition {
+  name: string; // Column Name in runtime SQL/JSON
+  columnType: 'number' | 'string' | 'boolean';      // Numeric, Text, or Boolean types (e.g., Amount)
+}
+
+/**
+ * Represents an existing data record stored in the database.
+ */
+interface AlchemyDataRecord {
+  id?: string;              // Unique identifier for this specific row/instance
+  schemaName: SchemaDefinition['name'];       // The type name defined in src/alchemy_database.ts
+  columnIndex: number;   // Column index (0-based) or key if using an array of schemas
+}
+
+/**
+ * Represents the current state of a single database record.
+ */
+interface DatabaseRecord {
+  id?: string;              // Optional unique ID for this specific instance
+  schemaName: SchemaDefinition['name'];       // The type name defined in src/alchemy_database.ts (e.g., 'amount')
+  value: number | null;      // Actual stored numeric or text data
+}
+
+// ============================================================================
+// 2. TYPE DEFINITIONS FOR EXTENSION (Extending AlchemyDatabase.ts)
+// ============================================================================
+
+/**
+ * Core Submission Type Definition from the plan.
  */
 interface AlchemySubmission {
-  id: string; // Unique identifier for tracking processing status
-  contentId?: string; // ID of uploaded file (if any)
+  id: string;                    // Unique identifier for tracking processing status
+  contentId?: string;             // ID of uploaded file (if any)
   metadata: Record<string, unknown>; // Optional custom metadata from LLM response or user input
 }
 
 /**
- * Submission Handler Interface
+ * Submission Handler Interface.
  */
 interface AlchemySubmissionHandler {
   /** 
@@ -80,12 +115,4 @@ const mockService = {
     }
 
     // Simulate background processing logic for analytics and notifications
-    const processed = await Promise.resolve({ id: generateId(), contentId: `${payload.content_id || 'raw'}` });
-
-    return processed;
-  },
-
-  generateId: () => Math.random().toString(36).substr(2, 9) + Date.now()
-};
-
-export { AlchemySubmissionHandler }; // Export for type definition purposes (in a real app this would be injected or used as module exports)
+    const
