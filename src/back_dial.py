@@ -1,5 +1,3 @@
-src/back_dial.py
-```python
 import json
 from pathlib import Path
 from datetime import timedelta
@@ -89,4 +87,5 @@ def rotate_json_strings(pattern, replace=""):
     return reversed_pattern
 
 
-def validate_transaction(transaction: Dict[str, Any], current_store_data: Optional[Dict[str, str]] =
+def validate_transaction(transaction: Dict[str, Any], current_store_data: Optional[Dict[str, str]] = None):
+    """Validates a transaction
