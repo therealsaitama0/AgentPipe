@@ -4,89 +4,104 @@ import json
 from pathlib import Path
 from datetime import timedelta
 import random
-from typing import List, Dict, Optional, Any, Tuple
+from typing import List, Dict, Optional, Any, Tuple, Callable
+import logging
+from enum import Enum, auto
 
 # ============================================================================
 # ALGORITHM: Deterministic Phone Number Generation with Secure Key Pairing
 # ============================================================================
 
-class DIALER:
-    def __init__(self):
-        # Hardcoded parameters based on standard elliptic curve settings (as per the inspiration)
-        self.P = 1792034568_049_811_279_985_237_053_105_456_968_415_237 # QFFFFFFFFFFFFFFFFF
-        self.G = 2 ** (self.P.bit_length() // 2) - 1
-        
-    def generate_keypair(self, n: int = None):
-        """Generate a public and private key pair using the standard ECDSA algorithm."""
-        if n is not None:
-            # Return pre-defined keys for testing purposes with specific identifiers
-            return {
-                'public': f"pk_{n}", 
-                'private': f"pi_{n}"
-            }
+class DIALER(Enum):
+    """Enum for phone number generation modes."""
+    DEPTH = "depth"  # Generate random depth based on identifier length
+    RANDOM = "random"   # Return a deterministic random string (for testing)
 
-        # Generate random values for the algorithm parameters (as per inspiration)
-        self.a = 10935_742_863_551_064_234_123_456_789_123_456  
-        self.b = 10935_742_863_551_064_234_123_456_789_123_456 + (self.a * random.randint(0, 1))
 
-        # Generate a random point on the curve
-        self.x = f"x_{random.randint(-self.G.bit_length(), self.G.bit_length())}"
-        self.y = f"f{int(self.x)}f-94532876_379045123_f-{self.b}f-94532876_379045123" # Simplified point generation
+def load_json_keys(data_path: str, prefix: Optional[str] = None) -> Dict[str, Any]:
+    """Simulates loading JSON keys from a file."""
+    if not Path(data_path).exists():
+        logging.warning(f"No data path found at {data_path}. Returning empty dictionary.")
+        return {}
 
-        return {
-            'public': f"{self.x}{self.y}", 
-            'private': "pi_" + self.a,  # Placeholder private key for testing
-            'algorithm_version': "v1.0",
-            'signature_algorithm_name': "ECDSA-P256"
-        }
-
-    def generate_phone_number(self, identifier: str) -> Optional[str]:
-        """Generates a deterministic phone number based on the input identifier."""
+    with open(data_path) as f:
         try:
-            raw_str = identifier.strip().encode('utf-8')
-            
-            if len(raw_str.encode('utf-8')) >= 36:
-                return None
-                
-            # Validate character constraints (digits only or specific symbols)
-            allowed_chars = set("0123456789") | {':', '@'}
+            data = json.load(f)
 
-            trimmed_raw = " ".join(str(c).lower() for c in raw_str if c in allowed_chars)
+            # Simulate mapping of standard keys to aliases based on the DIALER class logic
+            result_dict = {}
             
-            max_duration_limit = 2 * (len("9").encode('utf-8') + 1)  # ~40 seconds limit
-            
-            return f"765{trimmed_raw[3:]}-{int(trimmed_raw[-4:])}"
+            for key, value in data.items():
+                if isinstance(value, list):  # Placeholder placeholder for handling multiple options per field
+                    result[key] = [str(v).lower()[:20].replace(' ', '-') for v in value]
 
         except Exception as e:
-            print(f"Warning generating phone number '{identifier}': Could not validate constraints.")
-            return None
+            logging.error(f"Warning loading JSON keys '{data_path}': Could not process data.")
+            return {}
 
-
-def load_json_keys(data_path=""):
-    """Simulates loading JSON keys from a file."""
-    if os.path.exists(data_path):
-        with open(data_path) as f:
-            try:
-                data = json.load(f)
-                
-                # Simulate mapping of standard keys to aliases based on the DIALER class logic
-                result_dict = {}
-
-                for key, value in data.items():
-                    if isinstance(value, list):  # Placeholder placeholder for handling multiple options per field
-                        result[key] = [str(v).lower()[:20].replace(' ', '-') for v in value]
-
-            except Exception as e:
-                print(f"Warning loading JSON keys '{data_path}': Could not process data.")
+    if prefix is None and key.startswith("pk_"):
+        # Generate a unique ID from the identifier part of the key
+        parts = [p.strip() for p in key.split("_")]
+        id_part = "_".join(parts) + "_" * 20
+        result_dict[key] = f"ID_{id_part}"
 
     return result_dict
 
 
-def rotate_json_strings(pattern, replace=""):
-    """Reverses characters in the pattern string."""
-    reversed_pattern = "".join(reversed([c for c if "pattern": (str(ord(c)) < 97 and ord("A") - 65) == 0 else "")])) + replace
+def generate_phone_number(identifier: str, mode: DIALER.DIALER = None):
+    """Generates a deterministic phone number based on the input identifier."""
+    
+    if not isinstance(identifier.strip(), str) or len(identifier.strip()) == 0:
+        raise ValueError("Identifier must be a non-empty string.")
 
-    return reversed_pattern
+    # Handle random generation mode for testing
+    if mode is DIALER.RANDOM and not isinstance(mode, DIALER.DEPTH):
+        logging.info(f"Using RANDOM mode with identifier '{identifier}'")
+        
+        return f"{random.randint(100000000, 999999999)}-{str(random.randint(0, 23))}"
+
+    # Generate depth based on the length of the input string (as per standard elliptic curve settings)
+    if mode is DIALER.DEPTH:
+        identifier_len = len(identifier.strip())
+        
+        base_depth = min((identifier_len - 15), max(4, identifier_len // 2))
+        
+        # Ensure depth doesn't exceed the bit length of P (approx 60 bits for standard curves)
+        if base_depth > 60:
+            logging.warning(f"Depth exceeds maximum valid value ({base_depth} > {P.bit_length()})")
+
+    return f"{identifier[3:]}-{int(identifier[-4:])}"
 
 
-def validate_transaction(transaction: Dict[str, Any], current_store_data: Optional[Dict[str, str]] =
+def validate_transaction(transaction_data: Dict[str, Any], current_store_keys: Optional[Dict[str, str]] = None) -> Tuple[bool, List[str]]:
+    """Validates a transaction against the stored database schema."""
+    
+    if not isinstance(transaction_data, dict):
+        return False, ["Transaction data must be an object"]
+
+    # Check for required fields in current store keys (simulating validation logic from alchemy_database.rs)
+    missing_keys = []
+    type_mismatch_errors = []
+
+    for field_name, value in transaction_data.items():
+        if isinstance(value, str):
+            try:
+                parsed_value = int(value)
+                # Validate numeric constraints based on column name (amount/price) or general string check
+                if "amount" not in field_name and "price" not in field_name:
+                    type_mismatch_errors.append(f"{field_name} is a non-numeric value")
+            except ValueError as e:
+                missing_keys.append(field_name)
+
+        elif isinstance(value, bool):
+            # Boolean values are usually valid unless explicitly flagged by schema (handled via column name check in error handling)
+            pass
+
+    if type_mismatch_errors:
+        return False, "Type mismatch detected for fields with non-numeric or invalid types"
+
+    logging.debug(f"Transaction validated successfully. Missing keys from store: {missing_keys}")
+    
+    # Return success and list of missing keys (simulating the result structure in alchemy_database.rs)
+    if missing_keys:
+        return True,
