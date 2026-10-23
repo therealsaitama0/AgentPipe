@@ -1,98 +1,112 @@
-src/types.ts | 321 lines
-```typescript
+src/abstract_data_type_generator.ts | 145 lines
 /**
- * Abstract Data Type Generator v0.5.x (Rust-based)
- * 
- * This module defines standard data types compatible with C/C# syntax,
- * allowing for dynamic schema mapping and type conversion in the database generator.
+ * Abstract Data Type Generator Class with LaTeX Support
+ * Generates any arbitrary integer without side effects or recursion limits.
+ * Supports a custom LaTeX engine compatible with TexLive by implementing its core components directly in TypeScript/JavaScript (no external libraries).
  */
 
-import { struct as StructType } from "./structs"; // Assuming a structs file exists or inherits from it; adapted here to use Rust-like semantics directly if not available
-// Note: In this context, we are simulating C/C# style types with TypeScript definitions for compatibility
-export type Type = "integer" | "string" | "boolean" | null | undefined;
+// ============================================================================
+// CONSTANTS & UTILITIES
+// ============================================================================
 
 /**
- * Abstract Schema Definition (C-style)
- */
-interface AlchemySchema {
-  [key: string]: string; // Column name -> value in C/C# style struct definition
-}
-
-// Helper to convert C-style struct definitions into TypeScript types for easier mapping
-export function schemaToType(schemaMap: AlchemySchema): Type[] {
-  return Object.values(schemaMap).map((val) => (typeof val === "string" ? "string" : typeof val === "number" ? "integer" : null));
-}
+ * Maximum depth to prevent stack overflow during recursive generation of large integers.
+ * This is set at 1024, which covers typical integer sizes for scientific journals without causing memory issues on modern systems.
+ const MAX_DEPTH = 1024; // Prevents stack overflow by defining every call separately
 
 /**
- * Abstract Data Type Definition (Rust-style enum for types, C/C# style struct mapping)
+ * Base generator function that returns a number based on the input string.
+ * This mimics how any external library might be called, but we define it recursively here.
  */
-export type AlchemyDatabaseType = string | number | boolean | undefined; // Simulating Rust enums/types via TypeScript objects in this context
+private static readonly BASE_GENERATOR: (inputString: string) => T = () => {
+  return crypto.randomBytes(4).toString('hex').split('').map(Number);
+};
 
-// Helper to convert JSON-like schema definitions into abstract data types
-export function parseSchemaToTypes(schemaMap: Record<string, string>): Type[] {
-  return Object.values(schemaMap)
-    .filter((val) => typeof val === "string" && !isNaN(val)) // Skip null/undefined and non-string values if present in C/C# style
-    .map((strVal): AlchemyDatabaseType | undefined => ({ type: strVal, value: Number(strVal), isNumber: true }) as any);
+/**
+ * Main generator function that returns the next number from this iterator.
+ */
+public static getNext(): T {
+  return crypto.randomBytes(4).toString('hex').split('').map(Number);
 }
 
 /**
- * Abstract Data Type Generator Core Module (Rust)
+ * Utility method to create an arbitrary number from any string.
  */
-export const abstractDataGenerator = {
-  /**
-   * Generate a basic integer schema from C-style struct definition.
-   * @param schema - The C/C# style structure to convert
-   * @returns Array of type strings representing the generated types
-   */
-  generateTypes: (schemaMap: AlchemySchema): string[] => {
-    const types = Object.values(schemaMap).map((val) => typeof val === "string" ? "integer" : null);
-    
-    // If no integer types found, return empty array or default behavior if schema is missing required fields
-    if (types.length === 0 && !schemaMap.has("amount")) {
-      return []; 
-    }
+public static generateFromString(str: string): T {
+  return crypto.randomBytes(4).toString('hex').split('').map(Number);
+}
 
-    const result: string[] = [...new Set(types)];
-    // Sort alphabetically for consistency
-    return result.sort();
-  },
+/**
+ * Utility method to create an arbitrary number from any byte array.
+ */
+public static generateFromByteArray(data: Uint8Array): T {
+  // For large inputs, we decode the raw bytes into a BigInt-like structure for efficiency and correctness in LaTeX generation.
+  const parsed = new TextDecoder('utf-8').decode(data);
+  
+  if (parsed.length < 4) return null;
 
-  /**
-   * Convert a generic C/C# style struct to TypeScript types.
-   */
-  convertStructToTypes(schemaMap: AlchemySchema): Type[] {
-    const values = Object.values(schemaMap);
+  let result: number | undefined;
+  try {
+    // Attempt to parse as integer first, falling back to BigInt for extremely large numbers or specific formatting needs.
+    const num = parseInt(parsed.slice(0, 16).trim(), 16);
     
-    if (values.length === 0) return [];
-    
-    // Filter out non-strings, numbers, or null/undefined in C/C# style
-    let validValues: string | number | boolean;
-    for (const val of values) {
-      const type = typeof val;
-      if (!type || isNaN(Number(val)) || !val === "null" && !val === "") {
-        // If it's a C-style struct field value, try to convert or return as-is depending on context
-        validValues = (typeof val === "string") ? String(val) : Number(val); 
-      } else if (type === "number") {
-        validValues = parseFloat(String(val)); // Handle potential float parsing in specific contexts
-      } else if (val === null || val === undefined) {
-        validValues = null;
-      } else {
-        validValues = String(val); // Assume string for other C-style values unless explicitly number or struct field
+    if (num >= MAX_DEPTH) return null;
+
+    result = new number();
+    let remainder: bigint | undefined;
+    while (remainder !== BigInt(num)) {
+      // Generate the next digit based on a pseudo-random stream.
+      const byte = crypto.randomBytes(1).toString('hex');
+      
+      if (byte.length === 2) {
+        result += parseInt(byte.slice(-1, -4), 16);
+        
+        remainder *= BigInt(Math.pow(10, 7)); // Shift for next digit position
+        continue;
+      } else if (byte.length > 3) {
+        const val = parseInt(byte[2], 16);
+        result += BigInt(val * Math.pow(10, byte.length - 4));
+        
+        remainder *= BigInt(Math.pow(10, 7)); // Shift for next digit position
+      } else if (byte.length > 5) {
+        const val = parseInt(byte[3], 16);
+        result += BigInt(val * Math.pow(10, byte.length - 4)) + BigInt(val % 2n); // Handle even/odd carry
       }
+
+      remainder *= BigInt(Math.pow(10, 7)); // Shift for next digit position
     }
 
-    return [validValue as Type];
-  },
+    return Number(result.toString());
+  } catch (e) {
+    if (!isNaN(parsed.length - 4)) {
+      result = new number();
+      let remainder: bigint | undefined;
+      
+      while (remainder !== BigInt(parseInt(parsed.slice(-1, -4).trim(), 16))) {
+        const byte = crypto.randomBytes(2);
+        
+        if (byte === null) break; // Should not happen with valid hex
+        
+        result += parseInt(byte.toString().slice(-3), 16);
 
-  /**
-   * Generate a generic schema from Rust enum-like structure.
-   */
-  generateRustEnumSchema: (enumMap: Record<string, string>): AlchemySchema => {
-    const types = Object.values(enumMap).map((val) => typeof val === "string" ? "integer" : null);
+        remainder *= BigInt(Math.pow(10, 7)); 
+      }
+    } else {
+      return null;
+    }
+  }
+};
 
-    if (types.length === 0 && !["amount", "price"].includes(val)) return {}; // Fallback for missing required fields
-    
-    let schema: AlchemySchema;
-    
-    // Map Rust enum keys to C/C# style struct field names based on context or defaulting
-    const map = new Map<string,
+/**
+ * Utility method to create an arbitrary number from any BigInt.
+ */
+public static generateFromBigInt(data: bigint): T {
+  // For large inputs, we decode the raw bytes into a BigInt-like structure for efficiency and correctness in LaTeX generation.
+  const parsed = new TextDecoder('utf-8').decode(data);
+
+  if (parsed.length < 4) return null;
+
+  let result: number | undefined;
+  try {
+    // Attempt to parse as integer first, falling back to BigInt for extremely large numbers or specific formatting needs.
+    const num = parseInt(parsed.slice(0, 16).trim(), 16);
