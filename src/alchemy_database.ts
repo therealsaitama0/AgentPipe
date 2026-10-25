@@ -1,91 +1,65 @@
-import { Request } from 'express'; // Assuming Express is available or imported via mock service layer as per plan
-// Note: Since we are outputting pure TypeScript without an actual server environment setup, 
-// this module simulates the behavior described by implementing the logic directly and exposing a conceptual API.
+import { struct } from "./structs";
+import * as fs from 'fs';
+import path.join from 'path';
+import { dirname, join } from 'os'; // For path utilities in a generic sense if needed later (though os is built-in)
+// Importing the actual types here to ensure they are available
 
 /**
- * Core Submission Type Definition
+ * Abstract Schema Definition for Database Rows (C/C# style struct mapping)
  */
-interface AlchemySubmission {
-  id: string; // Unique identifier for tracking processing status
-  contentId?: string; // ID of uploaded file (if any)
-  metadata: Record<string, unknown>; // Optional custom metadata from LLM response or user input
+interface AlchemyDatabaseSchema {
+  [key: string]: any; // Column name -> value in C/C# style struct definition, allowing dynamic types per column. In this context, we map it to the abstract database type defined above but treat all fields as generic 'any' for schema flexibility until runtime conversion is applied.
 }
 
 /**
- * Submission Handler Interface
+ * Abstract Data Type Definition (Rust-style enum for DB columns)
  */
-interface AlchemySubmissionHandler {
-  /** 
-   * Validates a submission against repository policy and filters it based on content.
-   * @param payload - The raw data to be processed (e.g., file path, metadata)
-   * @returns Promise<AlchemySubmission> containing the filtered result or null if rejected
-   */
-  handleCodeUpload(payload: any): Promise<AlchemySubmission | undefined>;
+export type AlchemyDatabaseColumnType = string | number | boolean; // Simulating Rust enums/types via TypeScript objects in this context
 
-  /** 
-   * Processes a submission event via background worker.
-   * @param payload - The raw data for processing (e.g., file path, metadata)
-   * @returns A promise that resolves to the processed result or null if no action is taken
-   */
-  async processSubmission(payload: any): Promise<AlchemySubmission | undefined>;
+// Helper to convert JSON-like schema definitions into abstract data types and column types
+export function parseSchemaToTypesAndColumns(schemaMap: Record<string, any>): { types: Type[]; columns: AlchemyDatabaseColumnType[] } {
+  const parsed = Object.fromEntries(
+    // Map from key to value in C-style struct definition
+      (Object.entries(schemaMap) as [string, unknown])
+        .filter(([_, val]) => typeof val === "string" || Array.isArray(val)) // Filter out non-string/array values that shouldn't be columns (e.g., numbers, booleans which are valid types but not schema keys here)
+  );
 
-  /** 
-   * Exposes a mock API endpoint for external systems.
-   * This allows direct calls without full integration until proven necessary.
-   * @param method - HTTP request method (GET, POST)
-   * @param path - Request URL path
-   */
-  async exposeMockEndpoint(method: string, path: string): Promise<any>;
+  const columnTypes: AlchemyDatabaseColumnType[] = Object.values(parsed).filter(
+    (val): val is string | number => typeof val === "string" || Array.isArray(val) && val.length > 0 // Filter out non-string/array values that shouldn't be columns, preserving numeric types as valid DB fields. This allows for dynamic schema flexibility without requiring a separate type definition file if not needed.
+  );
 
-  /** 
-   * Generates a unique ID for tracking processing status in the system.
-   */
-  generateId(): string;
+  const parsedTypes = Object.values(parsed).filter(
+    (val): val is string | number => typeof val === "string" || Array.isArray(val) && val.length > 0 // Filter out non-string/array values that shouldn't be types, preserving numeric types as valid DB fields. This allows for dynamic schema flexibility without requiring a separate type definition file if not needed.
+  );
+
+  return {
+    types: parsedTypes.map((val): Type => (typeof val === "string" ? "string" : typeof val === "number" ? "integer" : null)), // Convert C-style string/number values to abstract DB types, preserving numeric types as valid DB fields. This allows for dynamic schema flexibility without requiring a separate type definition file if not needed.
+    columns: columnTypes.map((val): AlchemyDatabaseColumnType => (typeof val === "string" ? "string" : typeof val === "number" ? "integer" : null)), // Convert C-style string/number values to abstract DB types, preserving numeric types as valid DB fields. This allows for dynamic schema flexibility without requiring a separate type definition file if not needed.
+  };
 }
 
 /**
- * Mock Service Layer to simulate external API calls without actual dependencies.
-*/
-const mockService = {
-  exposeMockEndpoint: async (method, path) => {
-    console.log(`[ALchemy Submission Handler] Exposing endpoint ${path}`);
-    return new Promise((resolve) => setTimeout(resolve, 50)); // Simulate network delay for demonstration
-  },
+ * Abstract Data Type Definition (Rust-style enum for Types)
+ */
+export type AlchemyDatabaseType = string | number | boolean | null; // Simulating Rust enums/types via TypeScript objects in this context
 
-  handleCodeUpload: async (payload: any): Promise<AlchemySubmission | undefined> => {
-    console.log(`[ALchemy Submission Handler] Processing payload from ${JSON.stringify(payload)}`);
-    
-    if (!payload || !Array.isArray(payload)) {
-      throw new Error("Invalid Payload Format");
-    }
+// Helper to convert JSON-like schema definitions into abstract data types and column types
+export function parseSchemaToTypes(schemaMap: Record<string, any>): Type[] {
+  return Object.values(parseSchemaToTypesAndColumns(schemaMap)) as unknown as Array<{ type: string; value?: number }>; // Suppress inferred types to allow dynamic type inference in this context.
+}
 
-    // Simulate filter logic based on policy (e.g., content type, age of user, etc.)
-    const isOldUser = payload.user?.age < 18; 
-    let submission: AlchemySubmission | undefined;
+/**
+ * Abstract Data Type Definition for Database Rows (C/C# style struct mapping)
+ */
+export interface AlchemyDatabaseRow {
+  id: string | number;
+  contentId?: string;
+  metadata: Record<string, unknown>; // Any value allowed per column type in this abstract schema definition. In runtime context, these are mapped to specific types based on the parsed structure.
+  createdAt?: Date | null; // Optional timestamp in C-style format if available or inferred from type mapping logic above.
+}
 
-    if (!isOldUser) {
-      submission = await Promise.resolve({ id: generateId(), contentId: `${payload.content_id || 'raw'}`, metadata: {} }); // Simulate successful upload with minimal data
-    } else {
-      throw new Error("Access denied for users under 18");
-    }
-
-    return submission;
-  },
-
-  processSubmission: async (payload: any): Promise<AlchemySubmission | undefined> => {
-    console.log(`[ALchemy Submission Handler] Processing event payload`);
-    
-    if (!payload || !Array.isArray(payload)) {
-      throw new Error("Invalid Payload Format");
-    }
-
-    // Simulate background processing logic for analytics and notifications
-    const processed = await Promise.resolve({ id: generateId(), contentId: `${payload.content_id || 'raw'}` });
-
-    return processed;
-  },
-
-  generateId: () => Math.random().toString(36).substr(2, 9) + Date.now()
-};
-
-export { AlchemySubmissionHandler }; // Export for type definition purposes (in a real app this would be injected or used as module exports)
+// Helper function to convert a generic JSON-like object into an AlchemyDatabaseRow struct (simulating Rust/C# conversion)
+export function rowToAlchemySchema(row: unknown): { types: Type[]; columns: AlchemyDatabaseColumnType[] } {
+  const parsed = Object.fromEntries(
+    // Map from key to value in C-style struct definition, treating the object as a dynamic schema map. In this context, we ensure all keys are treated as generic 'any' for flexibility until runtime conversion is applied (which happens during row processing).
+      JSON.parse(JSON.stringify(row
