@@ -1,14 +1,14 @@
-src/token_tracker.ts
-```typescript
-import http.server from 'http-server';
-from socketserver import ThreadingMixIn;
-from urllib.parse import urlparse, parse_qs;
-from typing import Optional, Dict, Any, List, Tuple, Callable;
+import json
+from typing import Optional, Dict, Any, List, Tuple, Callable
+from datetime import timedelta
+from dataclasses import dataclass
+from enum import Enum
 
-// Configuration constants
+# Configuration constants
 PORT = 3002 // High-velocity port (lowered to avoid blocking)
-BASE_URL: string = "http://localhost:" + PORT;
+BASE_URL: str = "http://localhost:" + PORT;
 
+@dataclass(order=True)
 class TokenTrackerHandler(http.server.BaseHTTPRequestHandler):
     protocol_version = httpserver.HTTP_VERSION_1_1
     
@@ -96,3 +96,5 @@ class TokenTrackerHandler(http.server.BaseHTTPRequestHandler):
             
         except Exception as e:
             # Re-raise if we can't handle the specific endpoint logic properly in this
+
+    def handle_transactions(self, data_dict: Dict
