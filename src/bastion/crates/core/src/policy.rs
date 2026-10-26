@@ -1,21 +1,83 @@
-use crate::types::Action;
+src/bastion/crates/core/src/policy.rs
+```rust
+use crate::types::{Action, ActionType};
+use std::collections::HashMap;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// A policy decision with a reason and optional action pattern matching logic.
+#[derive(Debug, Clone)]
 pub enum PolicyDecision {
     Allow,
     Approve,
     Deny,
 }
 
-#[derive(Debug, Clone)]
-pub struct PolicyRule {
-    pub action_pattern: String,
-    pub decision: PolicyDecision,
-    pub reason: String,
+impl Default for PolicyDecision {
+    fn default() -> Self {
+        Self::Deny
+    }
 }
 
+/// A policy rule defining an action pattern and decision.
+#[derive(Debug, Clone)]
+pub struct PolicyRule {
+    pub action_pattern: String,  // e.g., "read*", "query*" etc.
+    #[allow(dead_code)]
+    pub reason: Option<String>,
+    
+    /// If true, the matching rule will be applied first before falling back to Deny/Approve logic (for complex patterns).
+    pub is_first_match: bool = false; 
+}
+
+/// An engine that holds a list of policies and returns decisions based on action types.
 pub struct PolicyEngine {
     rules: Vec<PolicyRule>,
+}
+
+impl Default for PolicyEngine {
+    fn default() -> Self {
+        let mut result = vec![PolicyRule::default(), PolicyRule::default(), 
+            PolicyRule::default(), PolicyRule::default(), PolicyRule::default(),
+            PolicyRule::default(), PolicyRule::default(), PolicyRule::default()];
+
+        // Add specific allowed patterns for outbound communication and data modification to avoid default deny.
+        result.push(PolicyRule {
+            action_pattern: "send_email".to_string(),
+            decision: PolicyDecision::Approve,
+            reason: Some("Outbound communication".into()),
+            is_first_match: false, // First match logic
+        });
+
+        result.push(PolicyRule {
+            action_pattern: "send_slack".to_string(),
+            decision: PolicyDecision::Approve,
+            reason: Some("Outbound communication".into()),
+            is_first_match: false,
+        });
+
+        result.push(PolicyRule {
+            action_pattern: "database_write".to_string(),
+            decision: PolicyDecision::Approve,
+            reason: Some("Data modification".into()),
+            is_first_match: true, // First match logic for database operations to catch them first
+        });
+
+        result.push(PolicyRule {
+            action_pattern: "file_write".to_string(),
+            decision: PolicyDecision::Approve,
+            reason: Some("State mutation".into()),
+            is_first_match: false,
+        });
+
+        // Add a default deny rule for * patterns to catch everything else.
+        result.push(PolicyRule {
+            action_pattern: "*".to_string(),
+            decision: PolicyDecision::Deny,
+            reason: "Default deny: no matching allow rule".into(),
+            is_first_match: true, // First match logic
+        });
+
+        Self { rules }
+    }
 }
 
 impl PolicyEngine {
@@ -23,97 +85,36 @@ impl PolicyEngine {
         Self { rules }
     }
 
+    /// Returns a default engine if empty.
     pub fn default() -> Self {
-        Self {
-            rules: vec![
-                PolicyRule {
-                    action_pattern: "read*".to_string(),
-                    decision: PolicyDecision::Allow,
-                    reason: "Read-only operations".to_string(),
-                },
-                PolicyRule {
-                    action_pattern: "query*".to_string(),
-                    decision: PolicyDecision::Allow,
-                    reason: "Read-only operations".to_string(),
-                },
-                PolicyRule {
-                    action_pattern: "search*".to_string(),
-                    decision: PolicyDecision::Allow,
-                    reason: "Read-only operations".to_string(),
-                },
-                PolicyRule {
-                    action_pattern: "send_email".to_string(),
-                    decision: PolicyDecision::Approve,
-                    reason: "Outbound communication".to_string(),
-                },
-                PolicyRule {
-                    action_pattern: "send_slack".to_string(),
-                    decision: PolicyDecision::Approve,
-                    reason: "Outbound communication".to_string(),
-                },
-                PolicyRule {
-                    action_pattern: "database_write".to_string(),
-                    decision: PolicyDecision::Approve,
-                    reason: "Data modification".to_string(),
-                },
-                PolicyRule {
-                    action_pattern: "file_write".to_string(),
-                    decision: PolicyDecision::Approve,
-                    reason: "State mutation".to_string(),
-                },
-                PolicyRule {
-                    action_pattern: "code_execution".to_string(),
-                    decision: PolicyDecision::Deny,
-                    reason: "Arbitrary code execution".to_string(),
-                },
-                PolicyRule {
-                    action_pattern: "exfiltrate*".to_string(),
-                    decision: PolicyDecision::Deny,
-                    reason: "Data exfiltration".to_string(),
-                },
-                PolicyRule {
-                    action_pattern: "deploy*".to_string(),
-                    decision: PolicyDecision::Deny,
-                    reason: "Deployment operations".to_string(),
-                },
-                PolicyRule {
-                    action_pattern: "*".to_string(),
-                    decision: PolicyDecision::Deny,
-                    reason: "Default deny".to_string(),
-                },
-            ],
-        }
+        Default::default()
     }
 
+    /// Checks if an action matches any rule pattern and returns the decision.
     pub fn evaluate(&self, action: &Action) -> PolicyDecision {
-        for rule in &self.rules {
-            if action_pattern_matches(&rule.action_pattern, &action.action_type) {
-                return rule.decision;
+        for (i, rule) in self.rules.iter().enumerate() {
+            // Check specific patterns first to ensure they are prioritized or handled correctly before falling back to generic logic if needed.
+            let matches = match_rule_matches(rule.action_pattern, &action.action_type);
+
+            if matches {
+                return match rule.is_first_match {
+                    true => rule.decision,  // First matching rules take precedence for specific actions (e.g., write)
+                    false => rule.decision,   // Generic deny/allow logic applies to others.
+                };
             }
         }
+
         PolicyDecision::Deny
     }
 
+    /// Returns the decision and reason if a match is found.
     pub fn evaluate_with_reason(&self, action: &Action) -> (PolicyDecision, String) {
-        for rule in &self.rules {
-            if action_pattern_matches(&rule.action_pattern, &action.action_type) {
-                return (rule.decision, rule.reason.clone());
-            }
-        }
-        (
-            PolicyDecision::Deny,
-            "Default deny: no matching allow rule".to_string(),
-        )
-    }
-}
+        for (i, rule) in self.rules.iter().enumerate() {
+            let matches = match_rule_matches(rule.action_pattern, &action.action_type);
 
-fn action_pattern_matches(pattern: &str, action_type: &str) -> bool {
-    if pattern == "*" {
-        return true;
-    }
-    if pattern.ends_with('*') {
-        let prefix = &pattern[..pattern.len() - 1];
-        return action_type.to_lowercase().starts_with(prefix);
-    }
-    action_type.to_lowercase() == pattern.to_lowercase()
-}
+            // Only return if the specific pattern was matched. Generic deny/allow logic applies to others.
+            if matches {
+                return (match rule.is_first_match {
+                    true => rule.decision,  // First matching rules take precedence for specific actions (e.g., write)
+                    false => match_rule_matches(rule.action_pattern, &action.action_type),     // Generic deny/allow logic applies to others.
+                });
