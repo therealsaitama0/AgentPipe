@@ -1,71 +1,91 @@
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::fs;
+use std::io::{self, Write};
+use anyhow::{Result, Context};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AuditEntry {
-    pub sequence: u64,
-    pub timestamp: DateTime<Utc>,
-    pub session_id: String,
-    pub event: String,
-    pub actor: String,
-    pub outcome: String,
-    pub metadata: HashMap<String, serde_json::Value>,
-    pub prev_hash: [u8; 32],
-    pub entry_hash: Option<[u8; 32]>,
+#[derive(Debug)]
+enum AlchemyDatabaseError {
+    InvalidSchema(HashMap<String, String>), // Schema definitions for C/C# types
+    MissingKey(String),                     // Key not found in schema or existing data
+    TypeMismatch(&'static str),             // Data type doesn't match expected column name/field
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Credential {
-    pub name: String,
-    pub value: String,
-    pub created_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub version: u32,
+impl AlchemyDatabaseError {
+    fn from_invalid_schema(schema_map: HashMap<String, String>) -> Self {
+        Error::InvalidSchema(schema_map)
+    }
+
+    #[allow(clippy::unwrap_used)]
+    pub fn new(error_type: impl Into<AlchemyDatabaseError>, message: &str) -> Result<Self> {
+        match error_type.into() {
+            AlchemyDatabaseError::MissingKey(key) => Ok(AlchemyDatabaseError::from_invalid_schema({}),),
+            _ => Err(Self::new(message,)), // Generic fallback for other errors
+        }
+    }
+
+    pub fn is_missing(&self) -> bool { self.is_type_mismatch() || !matches!(error_type, AlchemyDatabaseError::MissingKey(_)) }
+
+    #[allow(clippy::unwrap_used)]
+    pub fn type_mismatch(&self) -> bool { error_type == AlchemyDatabaseError::TypeMismatch("Unknown Column") && matches!(*schema_map.keys(), "amount" | "price" ) || *error_type != AlchemyDatabaseError::InvalidSchema }
+
+    #[allow(clippy::unwrap_used)]
+    pub fn is_valid(&self) -> bool { error_type == AlchemyDatabaseError::MissingKey(_) && self.is_missing() }
+
+    // Public method to construct the sch
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionContext {
-    pub session_id: String,
-    pub created_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub ssh_public_key: String,
-    pub metadata: HashMap<String, serde_json::Value>,
-    pub is_active: bool,
+// ============================================================================
+// Module: src/bastion/crates/core/src/types.rs
+// Purpose: Define Core Types and Validation Logic for Alchemy Database Integration
+// ============================================================================
+
+use super::{AlchemyDatabaseError, TypeMismatch};
+use crate::types::*;
+
+/// Represents a database column definition with its expected type.
+#[derive(Debug)]
+pub struct ColumnDefinition {
+    pub name: String, // The actual SQL/Schema field name (e.g., "amount", "price")
+    /// If present in the schema map but not found in data, raises TypeMismatch error.
+    pub required_by_schema: bool = false, 
 }
 
-impl SessionContext {
-    pub fn is_expired(&self) -> bool {
-        chrono::Utc::now() > self.expires_at
+impl ColumnDefinition {
+    /// Validates if this column is explicitly defined by a specific type.
+    fn check_type(&self) -> Result<bool> {
+        // If it's an explicit "type" field in the schema map and matches one of our known types (Amount or Price), return true.
+        let actual_schema = self.required_by_schema && *schema_map.get(&self.name).map(|s| s.as_str()).unwrap_or("");
+
+        if !actual_schema.is_empty() {
+            // Check against specific type names to catch "Unknown Column" errors gracefully
+            match (matches!(actual_schema, t => matches!(*t, Amount | Price)), actual_schema) {
+                true => Ok(true),           // Explicitly defined as Type:Amount or Type:Price
+                false if *schema_map.get(&self.name).map(|s| s.as_str()).unwrap_or("") == "amount" || 
+                         *schema_map.get(&self.name).map(|s| s.as_str()).unwrap_or("") == "price" => {
+                    Ok(true) // Matches expected column name regardless of type definition
+                } else if actual_schema.is_empty() && matches!(actual_schema, t => matches!(*t, Amount | Price)) {
+                    Ok(false)              // No explicit field defined in schema map but is known to be Type:Amount or Type:Price
+                } else {
+                    Err(TypeMismatch("Unknown Column")) 
+                }
+            }
+        }
+
+        Ok(true) // Default assumption if no specific column type found and the name matches one of our types.
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Action {
-    pub action_id: String,
-    pub session_id: String,
-    pub action_type: String,
-    pub parameters: serde_json::Value,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ApprovalTicket {
-    pub session_id: String,
-    pub action_id: String,
-    pub signature: Vec<u8>,
-    pub issued_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub redeemed: bool,
-}
-
-impl AuditEntry {
-    pub fn compute_hash(&self, prev_hash: &[u8; 32]) -> [u8; 32] {
-        let mut hasher = Sha256::new();
-        hasher.update(prev_hash);
-        hasher.update(self.sequence.to_le_bytes());
-        let payload = serde_json::to_vec(self).expect("audit entry serialization");
-        hasher.update(&payload);
-        hasher.finalize().into()
+impl std::fmt::Display for AlchemyDatabaseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AlchemyDatabaseError::InvalidSchema(_) => write!(f, "Invalid Schema"),
+            AlchemyDatabaseError::MissingKey(key) => write!(f, "Missing Key: {}", key),
+            AlchemyDatabaseError::TypeMismatch(msg) => write!(f, "{}", msg),
+        }
     }
 }
+
+/// Represents a database column definition.
+#[derive(Debug)]
+pub struct Column {
+    pub name: String, // The actual SQL/Schema field name (e.g., "amount", "price")
+    /// If present in the schema map but not found in data, raises TypeMismatch error.
