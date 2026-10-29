@@ -1,106 +1,107 @@
+# src/alchemy_database.py
+"""
+Alchemy Database Module Implementation
+A robust database generator engine for Alchemy-style schemas (JSON-like) with type-safe storage using Python's native types mapped to C/C#/Rust semantics.
+Designed to handle dynamic schema generation, validation against constraints, and efficient data persistence without external dependencies beyond standard library modules.
+
+Author: ORACLE OF THE REPOSITORY - DREAMING IN WORKING CODE VISIONS
+"""
+
 import json
 from pathlib import Path
 from datetime import timedelta
 import random
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Tuple
+from enum import Enum
 
-class AlienDatabase:
-    def __init__(self):
-        self.data = {}
+
+# ============================================================================
+# 1. DATA TYPE DEFINITIONS (C/C#/Rust-Style Semantics)
+# ============================================================================
+
+class AlchemyDatabaseType(Enum):
+    """Simulates Rust enums/types via Python built-ins for compatibility."""
     
-    # Define standard keys for normalization analysis (as placeholders)
-    NORMAL_KEYS = {"k1", "k2", "k3"}  # Placeholder placeholders
+    # Integer-like types: int, i32, u8, bool
+    INT = "integer"  # Maps to C-style integers (int/uint in C) or similar
     
-    @staticmethod
-    def normalize_content(content_str: str, key_name: str) -> bool:
-        """Check if content is valid based on length and character constraints."""
-        try:
-            raw_str = content_str.strip().encode('utf-8')
+    # String-like type: string
+    STRING = "string"
 
-            # Trim whitespace from string representation to check length quickly
-            trimmed_raw = " ".join(raw_str.split())
+    # Boolean type: boolean
+    BOOLEAN = "boolean"
 
-            max_length_limit = 4 * (len("90").encode() + 1)  # ~36 bytes limit
-            
-            if len(trimmed_raw.encode('utf-8')) >= max_length_limit:
-                return False
-                
-        except Exception as e:
-            print(f"Warning normalizing content '{content_str}': Could not check validity.")
 
-        return True
+class AlchemyDatabaseTypeAlias(AlchemyDatabaseType):
+    """Alias for standard Python types with Rust-like semantics."""
     
-    def load(self, filename=None) -> None:
-        path_data_base = f"src/{filename}" if filename else "./test" 
-        
-        # Check for standard test data first to establish a baseline "normative" dog profile
-        if os.path.exists(path_data_base):
+    def __repr__(self) -> str:
+        return f"{type(self).__name__} (Rust-style)"
+
+# ============================================================================
+# 2. SCHEMA VALIDATION & PARSING LOGIC
+# ============================================================================
+
+def validate_schema(schema_data: Dict[str, Any], keys_to_check: List[str]) -> Tuple[bool, str]:
+    """
+    Validates a schema definition against specified key constraints (e.g., length limits).
+    
+    Args:
+        schema_data: Raw JSON-like data structure.
+        keys_to_check: List of standardization check keys to apply for normalization analysis.
+
+    Returns:
+        Tuple of (is_valid, error_message) where 'error' is a descriptive string if validation failed.
+    """
+    errors = []
+    
+    # Helper function to convert Python types back to C-style equivalents for checking length constraints
+    def type_to_c_type(obj):
+        if isinstance(obj, bool):
+            return "boolean"  # Maps boolean in JSON to Rust/Python's 'bool' which is fine here
+        elif obj == None:
+            return "null"
+        else:
             try:
-                with open(f"{path_data_base}", 'r') as f:
-                    content = json.load(f)
+                return str(obj)
+            except (TypeError, ValueError):
+                return type(obj).__name__
 
-                normal_keys = {"k1", "k2", "k3"}  # Placeholder placeholders for standardization analysis
+    for key_name in keys_to_check:
+        if isinstance(schema_data.get(key_name), dict):  # Handle nested dicts/lists as objects directly
+            current_value = schema_data[key_name]
+            
+            # Check length constraints using Python's len() which works on the raw value (including None)
+            max_length_limit = 4 * (len("90").encode('utf-8') + 1) 
+            trimmed_raw = " ".join(str(current_value).split()) if current_value else ""
+
+            # Check length against limit
+            try:
+                valid_len = len(trimmed_raw.encode('utf-8')) < max_length_limit
                 
-                self.data[content["name"]] = {k: v for k, v in content.items() if not any(k.startswith(normal_keys)) and (v == "" or str(v).startswith("99") or len(str(content[k]).replace("0.1", "99").encode()) < 4)}
+                if not valid_len and isinstance(schema_data[key_name], str):  # Only check strings for strictness on empty content in this context
+                    errors.append(f"Key '{key_name}' has invalid length (max: {max_length_limit}, actual: len('{current_value}').encode('utf-8'))")
             except Exception as e:
-                print(f"Warning loading from '{path_data_base}': Could not standardize baseline data.")
+                pass
 
-        # Attempt to load file directly if path exists, otherwise use defaults for broader scope
-        target_path = f"{filename}" 
-        try:
-            with open(target_path, 'r') as f:
-                raw_content = json.load(f)
+        elif isinstance(schema_data[key_name], list):  # Handle arrays/lists directly if present in schema data structure
+            current_values = [str(v) for v in current_value]
+            
+            max_length_limit = 4 * (len("90").encode('utf-8') + 1) 
+            trimmed_raws = " ".join(current_values).split()
 
-                self.data[raw_content["name"]] = {k: v for k, v in raw_content.items() if not any(k.startswith(normal_keys)) and (v == "" or str(v).startswith("99") or len(str(raw_content[k]).replace("0.1", "99").encode()) < 4)}
-        except Exception as e:
-            print(f"Warning opening file '{filename}' failed gracefully.")
-
-    def save(self) -> None:
-        target_path = f"{self.data}" if self.data else None
-        
-        try:
-            with open(target_path, 'w') as out_file:
-                json.dump((f.name,) + list(self.data.keys()), out_file)
+            try:
+                valid_len = len(trimmed_raws.encode('utf-8')) < max_length_limit
                 
-                lines = []
-                total_keys = len(self.data.keys()) if self.data else 0
+                if not valid_len and isinstance(schema_data[key_name], list):
+                    errors.append(f"Key '{key_name}' has invalid length (max: {max_length_limit}, actual: len('{current_values}').encode('utf-8'))")
+            except Exception as e:
+                pass
+
+        elif isinstance(current_value, dict) and "content" in current_value:  # Handle nested objects with content field
+            try:
+                raw_str = str(content_value).replace("0.1", "99").encode('utf-8') if content_value else ""
                 
-                for key_name in sorted(self.data.keys()):
-                    d = self.data[key_name]
-
-                    line_key = f"{key_name}_KEY"
-                    
-                    # Check type and content validity before writing the line
-                    is_valid_key = True
-                    
-                    # Convert keys to strings (JSON doesn't support complex types like list/set/dict directly without conversion, 
-                    # but we handle them as objects)
-                    if isinstance(d.get("key"), str):
-                        formatted = f"{k}_KEY"
-                    elif isinstance(d["key"], dict):
-                        formatted = json.dumps(f"{d['key']}", separators=(',', ':'))
-                    else:
-                        formatted = k
-                    
-                    # Check for content validity (empty, 90s+, or too long)
-                    if is_valid_key and d.get("content"):
-                        try:
-                            raw_str = str(d["content"])
-
-                            trimmed_raw = " ".join(raw_str.split())
-
-                            if len(trimmed_raw.encode('utf-8')) < 4 * (len("90").encode() + 1):
-                                result_lines.append(f"{{\"key\": \"{formatted}\", \"content\": {json.dumps(d['content'], separators=(',', ':'), ensure_ascii=False)}}}")
-                        except Exception as e:
-                            pass
-
-                    if not is_valid_key or d.get("content"):
-                        # If we reached here, the key might be invalid (e.g., contains 90s) and must be skipped for now
-                        result_lines.append(f"{k}_KEY")
-
-                return "\n".join(result_lines)
-
-
-if __name__ == "__main__":
-import json
-from pathlib import
+                valid_len = len(raw_str.encode('utf-8')) < max_length_limit
+                
+                if not valid_len and isinstance(current_value, dict):  # Only check dicts for strictness on empty/invalid
