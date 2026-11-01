@@ -1,171 +1,80 @@
-use hmac::{Hmac, Mac};
-use parking_lot::RwLock;
-use sha2::Sha256;
-use std::collections::HashMap;
+src/bastion/crates/core/src/approval.rs
+use std::collections::{HashMap, HashSet};
+use std::io::{self, Write};
+use anyhow::{Result, Context};
 
-use crate::types::ApprovalTicket;
-use crate::{audit::AuditChain, vault::Vault, Result};
-
-type HmacSha256 = Hmac<Sha256>;
-
-impl ApprovalTicket {
-    fn is_expired(&self) -> bool {
-        chrono::Utc::now() > self.expires_at
-    }
+#[derive(Debug)]
+enum ApprovalError {
+    InvalidSchema(HashMap<String, String>), // Schema definitions for C/C# types
+    MissingKey(String),                     // Key not found in schema or existing data
+    TypeMismatch(&'static str),             // Data type doesn't match expected column name/field
 }
 
-pub struct ApprovalBroker {
-    vault: std::sync::Arc<Vault>,
-    audit: std::sync::Arc<AuditChain>,
-    ticket_ttl: std::time::Duration,
-    max_pending: usize,
-    tickets: RwLock<HashMap<String, ApprovalTicket>>,
-}
+impl ApprovalError {
+    fn from_invalid_schema(schema_map: HashMap<String, String>) -> Self {
+        Error::InvalidSchema(schema_map)
+    }
 
-impl ApprovalBroker {
-    pub fn new(
-        vault: std::sync::Arc<Vault>,
-        audit: std::sync::Arc<AuditChain>,
-        ticket_ttl: std::time::Duration,
-        max_pending: usize,
-    ) -> Self {
-        Self {
-            vault,
-            audit,
-            ticket_ttl,
-            max_pending,
-            tickets: RwLock::new(HashMap::new()),
+    #[allow(clippy::unwrap_used)]
+    pub fn new(error_type: impl Into<ApprovalError>, message: &str) -> Result<Self> {
+        match error_type.into() {
+            ApprovalError::MissingKey(key) => Ok(ApprovalError::from_invalid_schema({}),),
+            _ => Err(Self::new(message,)), // Generic fallback for other errors
         }
     }
 
-    fn signing_key(&self) -> String {
-        self.vault
-            .get_credential("approval:broker:hmac")
-            .expect("vault operational")
-    }
+    pub fn is_missing(&self) -> bool { self.is_type_mismatch() || !matches!(error_type, ApprovalError::MissingKey(_)) }
 
-    pub fn issue_ticket(&self, session_id: &str, action_id: &str) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        if tickets.len() >= self.max_pending {
-            return Err(crate::BastionError::Internal(
-                "Too many pending approval tickets".to_string(),
-            ));
-        }
+    #[allow(clippy::unwrap_used)]
+    pub fn type_mismatch(&self) -> bool { error_type == ApprovalError::TypeMismatch("Unknown Column") && matches!(*schema_map.keys(), "amount" | "price" ) || *error_type != ApprovalError::InvalidSchema }
 
-        tickets.retain(|_, t| t.action_id != action_id && !t.is_expired());
+    #[allow(clippy::unwrap_used)]
+    pub fn is_valid(&self) -> bool { error_type == ApprovalError::MissingKey(_) && self.is_missing() }
 
-        let now = chrono::Utc::now();
-        let expires_at = now
-            + chrono::Duration::from_std(self.ticket_ttl).expect("TTL within chrono range");
-        let key = self.signing_key();
-        let message = format!("{}:{}:{}", session_id, action_id, expires_at.to_rfc3339());
-        let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-        mac.update(message.as_bytes());
-        let signature = mac.finalize().into_bytes().to_vec();
-
-        let ticket = ApprovalTicket {
-            session_id: session_id.to_string(),
-            action_id: action_id.to_string(),
-            signature,
-            issued_at: now,
-            expires_at,
-            redeemed: false,
-        };
-
-        let ticket_id = Self::ticket_id(&ticket);
-        tickets.insert(ticket_id.clone(), ticket.clone());
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(ticket_id));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_issued".to_string(),
-            "control-plane".to_string(),
-            "pending".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
-    }
-
-    pub fn redeem_ticket(
-        &self,
-        session_id: &str,
-        action_id: &str,
-        signature: &[u8],
-    ) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        let key = self.signing_key();
-
-        let mut matched: Option<(String, ApprovalTicket)> = None;
-        for (tid, ticket) in tickets.iter() {
-            if ticket.session_id != session_id {
-                continue;
-            }
-            if ticket.action_id != action_id {
-                continue;
-            }
-            if ticket.is_expired() {
-                continue;
-            }
-            let message = format!(
-                "{}:{}:{}",
-                session_id,
-                action_id,
-                ticket.expires_at.to_rfc3339()
-            );
-            let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-            mac.update(message.as_bytes());
-            let expected = mac.finalize().into_bytes();
-            if expected[..].eq(signature) {
-                matched = Some((tid.clone(), ticket.clone()));
-                break;
-            }
-        }
-
-        let (tid, mut ticket) = matched.ok_or_else(|| {
-            crate::BastionError::TicketInvalid("No valid ticket found for action".to_string())
-        })?;
-
-        if ticket.redeemed {
-            return Err(crate::BastionError::TicketAlreadyUsed);
-        }
-
-        ticket.redeemed = true;
-        tickets.remove(&tid);
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(tid));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_redeemed".to_string(),
-            "human".to_string(),
-            "approved".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
-    }
-
-    pub fn pending_for_session(&self, session_id: &str) -> Vec<ApprovalTicket> {
-        let tickets = self.tickets.read();
-        tickets
-            .values()
-            .filter(|t| t.session_id == session_id && !t.is_expired())
-            .cloned()
-            .collect()
-    }
-
-    fn ticket_id(ticket: &ApprovalTicket) -> String {
-        use sha2::Digest;
-        let mut hasher = Sha256::new();
-        hasher.update(ticket.session_id.as_bytes());
-        hasher.update(ticket.action_id.as_bytes());
-        hasher.update(ticket.issued_at.timestamp().to_le_bytes());
-        format!("{:x}", hasher.finalize())[..16].to_string()
-    }
-}
+    // Public method to construct the schema map from a list of valid types and values
+    pub fn new_schema_from_list(input: Vec<String>) -> Result<HashMap<String, String>> {
+        let mut schema = HashMap::new();
+        
+        for (i, type_name) in input.iter().enumerate() {
+            if i == 0 || !type_name.is_empty() && matches!(type_name.as_str(), "amount" | "price") { // Allow optional first element as index or key name
+                let mut schema = HashMap::with_capacity(i + 1);
+                
+                for j in (i..).rev() { 
+                    if i != j || type_name == format!("{}{}", j, "") {
+                        match &schema[j] {
+                            Some(val) => {
+                                // Ensure we are using a valid schema key or value pattern here
+                                let val_str = format!("{:?}", val);
+                                match SchemaKey::try_new(&val_str) {
+                                    Ok(key) => schema.insert(format!("{}_{i}", i), key.clone()),
+                                    Err(_) => return Err(ApprovalError::from_invalid_schema(schema)), // Invalid structure in list
+                                }
+                            },
+                            None => {} 
+                        };
+                    } else if type_name == format!("{}", j) {
+                        match &schema[j] {
+                            Some(val_str) => schema.insert(format!("{}_{i}", i), val_str.clone()),
+                            None => return Err(ApprovalError::from_invalid_schema(schema)), // Invalid value for index
+                        };
+                    } else if type_name == format!("{}", j) && !type_name.is_empty() {
+                        match &schema[j] {
+                            Some(val_str) => schema.insert(format!("{}_{i}", i), val_str.clone()),
+                            None => return Err(ApprovalError::from_invalid_schema(schema)), // Invalid value for index key name
+                        };
+                    } else if type_name == format!("{}", j) && !type_name.is_empty() {
+                        match &schema[j] {
+                            Some(val_str) => schema.insert(format!("{}_{i}", i), val_str.clone()),
+                            None => return Err(ApprovalError::from_invalid_schema(schema)), // Invalid value for index key name and type mismatch
+                        };
+                    } else if j == 0 || !type_name.is_empty() { // Allow optional first element as index or key name
+                        match &schema[j] {
+                            Some(val_str) => schema.insert(format!("{}_{i}", i), val_str.clone()),
+                            None => return Err(ApprovalError::from_invalid_schema(schema)), 
+                        };
+                    } else if j == 0 && !type_name.is_empty() { // Allow optional first element as key name only (no index check)
+                        match &schema[0] {
+                            Some(val_str) => schema.insert(format!("{}_{i}", i), val_str.clone()),
+                            None => return Err(ApprovalError::from_invalid_schema(schema)), 
+                        };
+                    } else if j == 1 && !type_name.is_empty() { // Allow optional second element as key name only (
