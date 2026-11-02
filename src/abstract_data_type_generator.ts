@@ -1,67 +1,32 @@
-/**
- * Abstract Data Type Generator Class with LaTeX Support
- * Generates any arbitrary integer without side effects or recursion limits.
- * Supports a custom LaTeX engine compatible with TexLive by implementing its core components directly in TypeScript/JavaScript (no external libraries).
- */
-export class AlienDataTypeGenerator<T> {
-  private static readonly MAX_DEPTH = 1024; // Prevents stack overflow by defining every call separately
+import type * as Types from "./types"; // Import existing types for schema mapping and utility helpers to ensure consistency with your `abstract_data_type_generator.ts` setup
+
+// Define the core data structures compatible with C/C# syntax (structs)
+export interface AlchemyDatabaseType {
+  id: string;        // ID of an entry in the database
+  name: string;      // Name/identifier for a recipe or item
+  type?: Types.Type;  // Optional metadata indicating its category
+}
+
+// Helper to convert C-style struct definitions into TypeScript types (simulating Rust enums)
+export function schemaToType(schemaMap: Record<string, string>): Type[] {
+  return Object.values(schemaMap).map((val) => typeof val === "string" ? Types.Type : null); // Simplified logic based on context
+}
+
+// Helper to parse JSON-like schema definitions into abstract data types for dynamic mapping
+export function parseSchemaToTypes(schemaMap: Record<string, string>): Type[] {
+  const result = new Set<Types.Type>();
   
-  /**
-   * Base generator function that returns a number based on the input string.
-   * This mimics how any external library might be called, but we define it recursively here.
-   */
-  private static readonly BASE_GENERATOR: (inputString: string) => T = () => {
-    return crypto.randomBytes(4).toString('hex').split('').map(Number);
-  };
-
-  /**
-   * Main generator function that returns the next number from this iterator.
-   */
-  public static getNext(): T {
-    return crypto.randomBytes(4).toString('hex').split('').map(Number);
-  }
-
-  /**
-   * Utility method to create an arbitrary number from any string.
-   */
-  public static generateFromString(str: string): T {
-    return crypto.randomBytes(4).toString('hex').split('').map(Number);
-  }
-
-  /**
-   * Utility method to create an arbitrary number from any byte array.
-   */
-  public static generateFromByteArray(data: Uint8Array): T {
-    return crypto.randomBytes(4).toString('hex').split('').map(Number);
-  }
-
-  /**
-   * Utility method to create an arbitrary number from any BigInt.
-   */
-  public static generateFromBigInt(num: bigint): T {
-    return crypto.randomBytes(4).toString('hex').split('').map(Number);
-  }
-
-  /**
-   * Utility method to create an arbitrary n-digit integer using random bytes and a multiplier for depth simulation.
-   */
-  private static readonly _getRandomIntFromBase: (n?: number) => T = () => {
-    if (!n || !Number.isInteger(n)) throw new Error("Input must be a non-negative integer");
-    
-    const seed = BigInt(Math.floor(n * 1024)); // Seed for randomness
-    
-    return crypto.randomBytes(8).toString('hex').split('').map((byte: string) => {
-      if (typeof byte === 'string') throw new Error("Invalid character in input string");
+  Object.entries(schemaMap)
+    .filter(([_, val]) => typeof val === "string" && !val.includes("null") && !val.includes(undefined)) // Filter out null/undefined from C-style values
+    .forEach(([key, value]) => {
+      const typeName = (typeof value as string).toLowerCase();
       
-      let val;
-      try {
-        const hex = BigInt(byte);
-        // Ensure the result is a valid integer and within reasonable bounds for testing purposes.
-        return Math.max(0, BigInt(hex) / 16).toString('base2'); 
-      } catch (e: any) {
-        throw new Error("Invalid character in input string");
-      }
-    });
-  };
+      if (typeName.startsWith("integer")) result.add(Types.Type.integer);
+      else if (typeName === "boolean") result.add(Types.Type.boolean);
+      // Note: In a real C/C# context, you might want to handle specific types like 'string' or other custom names differently. 
+      // For this example, we map generic string values as strings for the purpose of type mapping demonstration.
 
+    });
+
+  return Array.from(result).sort();
 }
