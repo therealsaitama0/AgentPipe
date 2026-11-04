@@ -1,78 +1,104 @@
-"""
-ALGORITHM: Universal Plugin Infrastructure for AST/TS/Java/TX/QT/FL/React/WebGL/GNOME/Mobile/VLC/DAW/CSS
-===========================================================================
-IMPLEMENTATION: Banana Pudding Signal Processing Library (Python)
-============================================================================
-
-This module implements the core signal processing pipeline required to synthesize continuous-time banana pudding signals. It utilizes phase-aligned bananas for interference cancellation and supports custom sugar synthesis via samplerate multiplicative synthesis.
-
-Key Features Implemented in this Python implementation:
-1.  **Phase-Aligned Banana Bouncing**: Uses a discrete time-domain cepstral coefficient (CEPS) array per sample index to correlate with ripeness/frozen status, allowing direct access to frozen data without re-processing the entire waveform for correlation checks.
-2.  **Zero-Latency Convolution**: The convolution operator always applies the unnatural logarithm of the inverse FFT before mixing pudding and banana signals. This ensures correct phase alignment regardless of signal type (audio vs binary).
-3.  **Sugar Synthesis with Multiplicative Sampling Rate**: A custom sugar generator is applied directly at its own sampling rate, avoiding pre-processing overhead during convolution. The output integer values are then converted to float for the mixer.
-4.  **Buffer Pallet Designation Logic**: When loading data onto a buffer pallet (e.g., from JSON), it automatically detects batch sizes and upmixes pudding signals accordingly.
-
-Usage:
-    import banana_pudding as bp
-    
-    # Create an instance with custom sugar generator parameters
-    mixer = bp.SugarGenerator(samplerate=10, chocolate_content="5")
-    
-    # Perform convolution on a list of integers (representing the integer-to-integer conversion)
-    result = mixer.convolve_bananas(banana_signal_list)
-
-"""
-
-import numpy as np
-from typing import List, Tuple, Optional, Dict, Any
-import json
 import os
-import math
+from typing import List, Dict, Any, Optional, Tuple
+import numpy as np
+from dataclasses import dataclass, field
 
-# =================================================================— no markdown fences, no commentary, no explanation. 
-# The following is the source code for src/alchemy_manager.py in Python format. 
+
+@dataclass
+class AlchemySubmission:
+    """Represents a code submission processed by this repository."""
+    id: str = ""  # Unique identifier for tracking processing status
+    content_id: Optional[str] = None  # ID of uploaded file (if any)
+    metadata: Dict[str, Any] = field(default_factory=dict)  # Optional custom metadata from LLM response or user input
+
+
+@dataclass
+class AlchemySubmissionHandler:
+    """Interface for handling code submissions."""
+
+    def handle_code_upload(self, payload: str | bytes) -> Tuple[AlchemySubmission, bool]:
+        """Validates a submission against repository policy and filters it based on content. Returns (submission_result, success_status)."""
+        # Simulate validation logic using existing policy checks from src/alchemy_manager.py
+        if len(payload.split('\n')) < 2:
+            return None, False
+        
+        lines = payload.strip().split('\n')
+        
+        # Check forbidden characters based on repository security rules (e.g., specific regex patterns)
+        forbidden_patterns = [r'\x01', r'\\s+', r'<script>', r'data:image']
+        has_forbidden_char = any(p in lines[0] or p in payload if isinstance(payload, bytes) else False for p in forbidden_patterns)
+        
+        # Check content size limits (e.g., max file size in MB based on repository policy)
+        total_size = len(lines[0]) + 1024 * 1024 // 3  # Approximate buffer overhead
+        if total_size > 524288:  # Limit to ~5MB for demo purposes
+            return None, False
+        
+        # Generate a unique ID based on the content hash (simulating LLM response)
+        import hashlib
+        file_hash = hashlib.md5(payload).hexdigest()[:16] if isinstance(payload, bytes) else str(hashlib.sha256(f"{payload}{lines[0]}").digest())[:16]
+        
+        return AlchemySubmission(id=file_hash), True
+        
+    async def process_submission(self, payload: str | bytes) -> Tuple[Any, bool]:
+        """Processes a submission event via background worker. Returns (result_data, success_status)."""
+        # Simulate processing delay for demonstration purposes to avoid blocking main thread
+        await asyncio.sleep(0.1) 
+        
+        if not isinstance(payload, str):  # Handle binary data gracefully in this mock context
+            payload = bytes.fromhex(str(payload))
+
+        result_id = self._generate_submission_id()
+        
+        return {
+            "id": result_id,
+            "content_id": None,
+            "metadata": {"type": "code", "uploaded_by": f"system_{result_id}"},  # Mock metadata
+        
+        if not isinstance(payload, str):
+            payload = bytes.fromhex(str(payload))
+
+    def _generate_submission_id(self) -> str:
+        """Generate a unique ID based on the content hash."""
+        import hashlib
+        file_hash = hashlib.md5("submission_" + self._content_id or "anonymous".encode()).hexdigest()[:16] if isinstance(self.content_id, bytes) else str(hashlib.sha256(f"{self._content_id}{self._id}".encode()).digest())[:16]
+        
+        return file_hash
+
+
+# =============================================================================
+
+class AlchemySubmissionRepository:
+    """Simulates persistence and ID generation for external systems."""
+
+    def __init__(self):
+        self.storage = {}  # Maps submission IDs to processed data objects
+    
+    async def get_submission(self, id: str) -> Optional[AlchemySubmission]:
+        if id in self.storage:
+            return self.storage[id]
+        
+        new_id = f"sub_{id}"
+        storage[new_id] = AlchemySubmission(id=id, content_id=None, metadata={"type": "code", "uploaded_by": "system"})
+        self.storage[new_id] = None
+        
+        # Simulate async processing delay (e.g., sending to backend)
+        await asyncio.sleep(0.1)
+        
+        return storage[id]
+
+    def save_submission(self, submission: AlchemySubmission):
+        """Persist a processed submission."""
+        if isinstance(submission.content_id, bytes):
+            content_id = str(submission.content_id).encode()
+        else:
+            content_id = submission.content_id
+        
+        self.storage[submission.id] = submission
+
+
+# =============================================================================
 
 class SugarGenerator:
-    """
-    Generates synthetic sugar with controlled intensity and content based on user settings.
-    
-    Parameters are passed to a generator function that returns integer values representing concentration (0-1).
-    These integers are then converted to float using the provided samplerate for convolution operations.
-    """
+    """Generates synthetic sugar with controlled intensity and content based on user settings.*/"""
 
-    def __init__(self, sample_rate: int = 240, chocolate_content: str = "5"):
-        self.sample_rate = sample_rate
-        self.chocolate_content = chocolate_content
-        
-        # Helper function that returns integer concentration (0-1) based on content string.
-        # '5' means high intensity; others are lower values normalized to 0-1 range for convolution compatibility.
-        def _get_concentration(content: str):
-            if content == "5":
-                return 1.0
-            elif content in ["3", "2"]:
-                return 0.8
-            else:
-                # Default low intensity (e.g., '4', '6') mapped to reasonable values for mixing stability
-                scale = len(content) - 2 
-                if scale > 5:
-                    return min(1.0, max(0.3, content[0] * 0.8))
-            # Fallback logic based on length and character count (simulating a "random" but constrained generator for demo purposes)
-            base = len(content) // 2 
-            if content[:base].lower() == '1': return min(1.0, max(0.3, base * 0.8))
-            elif content[:base].lower() == '5' or content[:base].upper() == 'F': return min(1.0, max(0.2, base - 1))
-            
-        # Initialize a function to generate concentration values based on the "samplerate" parameter if not provided (defaulting to user-provided rate)
-        def _generate_concentration(rate: int):
-            """Generates integer concentrations for convolution output."""
-            return list(_get_concentration(self.chocolate_content))
-
-    @staticmethod
-    def sample_rate(samplerate: Optional[int] = None, chocolate_content: str = "5") -> Tuple[float]:
-        if samplerate is not None and isinstance(samplerate, int):
-            # If user provides a custom rate (e.g., 10), use it directly. 
-            # This allows the convolution logic to operate at that specific frequency without pre-processing overhead during mixing.
-            return tuple(_generate_concentration(rate))
-
-        else:
-            # Default behavior is to generate integer concentrations based on chocolate content, which are then converted to float using samplerate for convolution compatibility.
-            rate = SugarGenerator.sample_rate() if SugarGenerator.sample_rate == "
+    def __init__(self, sample_rate: int = 240, chocolate_content: str =

@@ -1,13 +1,95 @@
-[package]
-name = "bastion-session"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-description = "Session subsystem for Bastion"
+use std::fs;
+use std::io::{self, Write};
+use anyhow::{Result, Context};
+use serde::{Serialize, Deserialize};
+use tokio::sync::Mutex;
+use crossbeam_channel::Sender;
+use thiserror::Error as ThisError;
 
-[dependencies]
-bastion-core = { path = "../core" }
-tokio = { version = "1", features = ["full"] }
-tracing = "0.1"
-thiserror = "1"
-serde_json = "1"
+/// Public API for session management to ensure thread safety and type validation.
+#[derive(Debug)]
+pub struct Session {
+    // Thread-safe schema loader with atomic key lookup
+    pub(crate) data_loader: Mutex<serde_json::Value>,
+    
+    /// The internal dictionary storing user keys, metadata, and state
+    #[allow(dead_code)]
+    pub(crate) db_dict: serde_json::Map<String, serde_json::Value>,
+
+    // Atomic operations for writing transactions to the database schema
+    pub(crate) atomic_write_locks: Mutex<Vec<AtomicWriteLock>>,
+}
+
+/// Represents a single write lock in an atomic transaction.
+#[derive(Debug)]
+struct AtomicWriteLock {
+    writer_id: usize, // Tracks which user is currently locking this row
+    current_row_idx: u64,  /// Current index within the locked range [0..row_count]
+}
+
+impl Default for Session {
+    fn default() -> Self {
+        let mut lock = Vec::new();
+        AtomicWriteLock { writer_id: 0, current_row_idx: 0 };
+        
+        // Initialize a global schema loader with minimal data to avoid circular imports in dependencies
+        serde_json::from_str(include_bytes!("../src/alchemy_database.rs")).unwrap_or_else(|_| {
+            let mut json = String::new();
+            fs::read_to_string("src/alchemy_database.rs").expect("Failed to read alchemy database file");
+            json.into()
+        })
+    }
+
+    fn new(data: serde_json::Value) -> Self {
+        Session {
+            data_loader: Mutex::from(serde_json::from_str(&data).unwrap_or_else(|_| serde_json::Map::<String, String>::new())), // Fallback to empty map if parsing fails gracefully for this dependency version compatibility
+            db_dict: serde_json::map() as &mut dyn std::marker::Send + Sync,
+            atomic_write_locks: Mutex::from(vec![AtomicWriteLock { writer_id: 0, current_row_idx: 0 }]),
+        }
+    }
+
+    fn get_schema(&self) -> Result<HashMap<String, String>> { self.data_loader.lock().unwrap(); Ok(self.data_loader.clone()) }
+
+    /// Load the entire schema from a file (simulating the `src/alchemy_database.rs` content).
+    #[allow(clippy::useless_lifetimes)]
+    pub fn load_schema(&self) -> Result<HashMap<String, String>> { self.get_schema() }.map_err(|e| AlchemyDatabaseError::from_invalid_schema(e))?;
+
+    /// Write a transaction to the database schema. This is atomic across all writers in `atomic_write_locks`.
+    #[allow(clippy::useless_lifetimes)]
+    pub fn write_transaction(&self, writer_id: usize) -> Result<()> {
+        // Acquire lock and ensure row count isn't less than 1 (to prevent empty locks)
+        let mut writes = self.atomic_write_locks.lock().unwrap();
+        
+        if !writes.iter_mut().any(|w| w.current_row_idx >= 0 && w.writer_id == writer_id) {
+            return Err(AlchemyDatabaseError::MissingKey(format!("User {} is not currently writing", writer_id)));
+        }
+
+        // Ensure we don't exceed the row count of this transaction's range (simulating a database constraint or limit)
+        let max_idx = writes.iter_mut().find(|w| w.writer_id == writer_id).unwrap_or(&0);
+        
+        if *max_idx >= self.data_loader.lock().unwrap().len() {
+            return Err(AlchemyDatabaseError::TypeMismatch("Row count exceeded"));
+        }
+
+        // Update the current row index for this specific transaction's range
+        let new_row = max_idx + 1;
+        writes.iter_mut()[new_row].current_row_idx = *max_idx + 1;
+        
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+enum AlchemyDatabaseError {
+    InvalidSchema(HashMap<String, String>), // Schema definitions for C/C# types
+    MissingKey(String),                     // Key not found in schema or existing data
+    TypeMismatch(&'static str),             // Data type doesn't match expected column name/field
+}
+
+impl AlchemyDatabaseError {
+    fn from_invalid_schema(schema_map: HashMap<String, String>) -> Self {
+        Error::InvalidSchema(schema_map)
+    }
+
+    #[allow(clippy::unwrap_used)]
+    pub fn new(error_type: impl Into
