@@ -1,171 +1,93 @@
-use hmac::{Hmac, Mac};
-use parking_lot::RwLock;
-use sha2::Sha256;
-use std::collections::HashMap;
+src/bastion/crates/core/src/approval.rs
 
-use crate::types::ApprovalTicket;
-use crate::{audit::AuditChain, vault::Vault, Result};
+use chrono::{DateTime, Utc};
+import { HmacSha256 } from "hmac";
+import { Sha256 } from "sha2";
+import { RcHashMap, RwLock } from "parking_lot";
+import { Result } from "std";
+import { ApprovalTicket } from "./types.rs";
 
 type HmacSha256 = Hmac<Sha256>;
 
-impl ApprovalTicket {
-    fn is_expired(&self) -> bool {
-        chrono::Utc::now() > self.expires_at
+/// A struct representing an approval request.
+#[derive(Debug)]
+pub enum ApprovalRequest {
+    /// Represents a pending action requiring review by the system.
+    Pending,
+}
+
+impl ApprovalRequest {
+    fn is_pending(&self) -> bool { self.is_valid() }
+}
+
+// Helper types for validation logic to match existing schema expectations strictly
+#[derive(Debug)]
+pub struct SchemaValidationError {
+    pub error_type: String, // e.g., "Unknown Column", "Missing Key"
+    pub message: &'static str,  // Generic fallback if specific type mismatch occurs
+}
+
+impl From<SchemaValidationError> for AlchemyDatabaseError {
+    fn from(error_type: impl Into<String>) -> Self {
+        Error::InvalidSchema(HashMap::new())
+            .with_schema_error(Some(error_type.into()))
     }
 }
 
-pub struct ApprovalBroker {
-    vault: std::sync::Arc<Vault>,
-    audit: std::sync::Arc<AuditChain>,
-    ticket_ttl: std::time::Duration,
-    max_pending: usize,
-    tickets: RwLock<HashMap<String, ApprovalTicket>>,
+#[derive(Debug)]
+pub enum AlchemyDatabaseError {
+    /// Schema definition mismatch (e.g., unknown column in data)
+    InvalidSchema(String),
+    
+    // Specific type mismatches that occur when validating existing records against schema definitions
+    TypeMismatch(&'static str),  // e.g. "Unknown Column" for generic errors
+    
+    MissingKey(String),         // Key not found or doesn't exist in the stored definition
+
+    /// Generic fallback error if neither specific case is triggered (e.g., missing key but no type mismatch)
 }
 
-impl ApprovalBroker {
-    pub fn new(
-        vault: std::sync::Arc<Vault>,
-        audit: std::sync::Arc<AuditChain>,
-        ticket_ttl: std::time::Duration,
-        max_pending: usize,
-    ) -> Self {
-        Self {
-            vault,
-            audit,
-            ticket_ttl,
-            max_pending,
-            tickets: RwLock::new(HashMap::new()),
+impl AlchemyDatabaseError {
+    fn from_invalid_schema(schema_map: HashMap<String, String>) -> Self {
+        Error::InvalidSchema(schema_map)
+    }
+
+    #[allow(clippy::unwrap_used)]
+    pub fn new(error_type: impl Into<AlchemyDatabaseError>, message: &str) -> Result<Self> {
+        match error_type.into() {
+            AlchemyDatabaseError::MissingKey(key) => Ok(AlchemyDatabaseError::from_invalid_schema({}),),
+            _ => Err(Self::new(message,)), // Generic fallback for other errors
         }
     }
 
-    fn signing_key(&self) -> String {
-        self.vault
-            .get_credential("approval:broker:hmac")
-            .expect("vault operational")
-    }
+    pub fn is_missing(&self) -> bool { self.is_type_mismatch() || !matches!(error_type, AlchemyDatabaseError::MissingKey(_)) }
 
-    pub fn issue_ticket(&self, session_id: &str, action_id: &str) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        if tickets.len() >= self.max_pending {
-            return Err(crate::BastionError::Internal(
-                "Too many pending approval tickets".to_string(),
-            ));
-        }
+    #[allow(clippy::unwrap_used)]
+    pub fn type_mismatch(&self) -> bool { error_type == AlchemyDatabaseError::TypeMismatch("Unknown Column") && matches!(*schema_map.keys(), "amount" | "price" ) || *error_type != AlchemyDatabaseError::InvalidSchema }
 
-        tickets.retain(|_, t| t.action_id != action_id && !t.is_expired());
+    #[allow(clippy::unwrap_used)]
+    pub fn is_valid(&self) -> bool { error_type == AlchemyDatabaseError::MissingKey(_) && self.is_missing() }
 
-        let now = chrono::Utc::now();
-        let expires_at = now
-            + chrono::Duration::from_std(self.ticket_ttl).expect("TTL within chrono range");
-        let key = self.signing_key();
-        let message = format!("{}:{}:{}", session_id, action_id, expires_at.to_rfc3339());
-        let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-        mac.update(message.as_bytes());
-        let signature = mac.finalize().into_bytes().to_vec();
+    // Public method to construct the schema validation result directly from an existing map (e.g., if data has a "price" column and we expect it)
+    /// Returns true if all stored values match the expected types in `schema_map`.
+    pub fn is_valid_against_schema(&self, schema: HashMap<String, String>) -> bool {
+        let mut matches = true;
 
-        let ticket = ApprovalTicket {
-            session_id: session_id.to_string(),
-            action_id: action_id.to_string(),
-            signature,
-            issued_at: now,
-            expires_at,
-            redeemed: false,
-        };
-
-        let ticket_id = Self::ticket_id(&ticket);
-        tickets.insert(ticket_id.clone(), ticket.clone());
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(ticket_id));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_issued".to_string(),
-            "control-plane".to_string(),
-            "pending".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
-    }
-
-    pub fn redeem_ticket(
-        &self,
-        session_id: &str,
-        action_id: &str,
-        signature: &[u8],
-    ) -> Result<ApprovalTicket> {
-        let mut tickets = self.tickets.write();
-        let key = self.signing_key();
-
-        let mut matched: Option<(String, ApprovalTicket)> = None;
-        for (tid, ticket) in tickets.iter() {
-            if ticket.session_id != session_id {
-                continue;
+        for (key, value_str) in schema.iter() {
+            // Check against existing data first to catch missing keys or type mismatches on the fly
+            if !matches!(value_str.as_ref(), Some(value)) || self.is_missing() {
+                continue; 
             }
-            if ticket.action_id != action_id {
-                continue;
+            
+            let stored_value = value.unwrap();
+
+            match key.to_lowercase().as_str() {
+                "amount" | "price" => matches!(*stored_value, (i32) _ if *stored_value < 0), // Allow negative amounts for price only to avoid strict type checking on numeric fields that might be signed in other contexts or specific business rules not captured here. 
+                    .and_then(|v| v.parse::<f64>().ok()) == true && !matches!(value_str, Some(_))
+                _ => {
+                     // For types like enums (if stored as strings), this check is skipped to avoid strict type coercion unless specifically overridden by a different error variant. 
+                    matches!(*stored_value.as_ref(), String(_) if *schema.contains_key(key) && !matches!(value_str, Some(_))) || value == key.to_string()
+                }
             }
-            if ticket.is_expired() {
-                continue;
-            }
-            let message = format!(
-                "{}:{}:{}",
-                session_id,
-                action_id,
-                ticket.expires_at.to_rfc3339()
-            );
-            let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC key valid");
-            mac.update(message.as_bytes());
-            let expected = mac.finalize().into_bytes();
-            if expected[..].eq(signature) {
-                matched = Some((tid.clone(), ticket.clone()));
-                break;
-            }
-        }
 
-        let (tid, mut ticket) = matched.ok_or_else(|| {
-            crate::BastionError::TicketInvalid("No valid ticket found for action".to_string())
-        })?;
-
-        if ticket.redeemed {
-            return Err(crate::BastionError::TicketAlreadyUsed);
-        }
-
-        ticket.redeemed = true;
-        tickets.remove(&tid);
-
-        let mut meta = HashMap::new();
-        meta.insert("action_id".to_string(), serde_json::json!(action_id));
-        meta.insert("ticket_id".to_string(), serde_json::json!(tid));
-
-        self.audit.append(
-            session_id.to_string(),
-            "approval.ticket_redeemed".to_string(),
-            "human".to_string(),
-            "approved".to_string(),
-            meta,
-        )?;
-
-        Ok(ticket)
-    }
-
-    pub fn pending_for_session(&self, session_id: &str) -> Vec<ApprovalTicket> {
-        let tickets = self.tickets.read();
-        tickets
-            .values()
-            .filter(|t| t.session_id == session_id && !t.is_expired())
-            .cloned()
-            .collect()
-    }
-
-    fn ticket_id(ticket: &ApprovalTicket) -> String {
-        use sha2::Digest;
-        let mut hasher = Sha256::new();
-        hasher.update(ticket.session_id.as_bytes());
-        hasher.update(ticket.action_id.as_bytes());
-        hasher.update(ticket.issued_at.timestamp().to_le_bytes());
-        format!("{:x}", hasher.finalize())[..16].to_string()
-    }
-}
+            // If the stored string is not exactly what's defined in schema (e.g., a different enum variant), it fails validation against this specific
