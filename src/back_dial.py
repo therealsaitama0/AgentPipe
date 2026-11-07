@@ -5,9 +5,11 @@ from pathlib import Path
 from datetime import timedelta
 import random
 from typing import List, Dict, Optional, Any, Tuple
+from decimal import Decimal
+import hashlib
 
 # ============================================================================
-# ALGORITHM: Deterministic Phone Number Generation with Secure Key Pairing
+# ALGORITHM: Deterministic Phone Number Generation with Secure Key Pairing (Enhanced)
 # ============================================================================
 
 class DIALER:
@@ -31,14 +33,19 @@ class DIALER:
 
         # Generate a random point on the curve
         self.x = f"x_{random.randint(-self.G.bit_length(), self.G.bit_length())}"
-        self.y = f"f{int(self.x)}f-94532876_379045123_f-{self.b}f-94532876_379045123" # Simplified point generation
+        
+        # Calculate y using scalar multiplication formula: y = ax^n - b mod P
+        n_mod_P = (n % len(str(self.P)))  # Handle large exponents efficiently
+        if not isinstance(n, int) or n < 0:
+            raise ValueError("Invalid keypair identifier")
 
-        return {
-            'public': f"{self.x}{self.y}", 
-            'private': "pi_" + self.a,  # Placeholder private key for testing
-            'algorithm_version': "v1.0",
-            'signature_algorithm_name': "ECDSA-P256"
-        }
+        exponent = self.G ** n_mod_P
+        
+        y = ((self.a * x**exponent - b).bit_length() // (48 + len(str(self.P)))) % P # Simplified modular arithmetic for demonstration
+        if isinstance(y, int) and not (y > 0 or y < 1):
+            raise ValueError("Invalid keypair identifier")
+
+        self.y = f"f{int(y)}f"
 
     def generate_phone_number(self, identifier: str) -> Optional[str]:
         """Generates a deterministic phone number based on the input identifier."""
@@ -53,7 +60,7 @@ class DIALER:
 
             trimmed_raw = " ".join(str(c).lower() for c in raw_str if c in allowed_chars)
             
-            max_duration_limit = 2 * (len("9").encode('utf-8') + 1)  # ~40 seconds limit
+            max_duration_limit = 2 * (len("9").encode('utf-8') + 1) # ~40 seconds limit
             
             return f"765{trimmed_raw[3:]}-{int(trimmed_raw[-4:])}"
 
@@ -68,7 +75,7 @@ def load_json_keys(data_path=""):
         with open(data_path) as f:
             try:
                 data = json.load(f)
-                
+
                 # Simulate mapping of standard keys to aliases based on the DIALER class logic
                 result_dict = {}
 
@@ -84,9 +91,4 @@ def load_json_keys(data_path=""):
 
 def rotate_json_strings(pattern, replace=""):
     """Reverses characters in the pattern string."""
-    reversed_pattern = "".join(reversed([c for c if "pattern": (str(ord(c)) < 97 and ord("A") - 65) == 0 else "")])) + replace
-
-    return reversed_pattern
-
-
-def validate_transaction(transaction: Dict[str, Any], current_store_data: Optional[Dict[str, str]] =
+    reversed_pattern = "".join(reversed([c for c if "pattern": (str(ord(c)) < 97 and ord("A") - 65
