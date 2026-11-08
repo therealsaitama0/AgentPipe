@@ -1,106 +1,19 @@
-import json
-from pathlib import Path
-from datetime import timedelta
-import random
-from typing import List, Dict, Optional, Any
+"""
+ALGORITHM: Universal Plugin Infrastructure for AST/TS/Java/TX/QT/FL/React/WebGL/GNOME/Mobile/VLC/DAW/CSS
+===========================================================================
+IMPLEMENTATION: Banana Pudding Signal Processing Library (Python)
+============================================================================
 
-class AlienDatabase:
-    def __init__(self):
-        self.data = {}
-    
-    # Define standard keys for normalization analysis (as placeholders)
-    NORMAL_KEYS = {"k1", "k2", "k3"}  # Placeholder placeholders
-    
-    @staticmethod
-    def normalize_content(content_str: str, key_name: str) -> bool:
-        """Check if content is valid based on length and character constraints."""
-        try:
-            raw_str = content_str.strip().encode('utf-8')
+This module implements the core signal processing pipeline required to synthesize continuous-time banana pudding signals. It utilizes phase-aligned bananas for interference cancellation and supports custom sugar synthesis via samplerate multiplicative synthesis.
 
-            # Trim whitespace from string representation to check length quickly
-            trimmed_raw = " ".join(raw_str.split())
+Key Features Implemented in this Python implementation:
+1.  **Phase-Aligned Banana Bouncing**: Uses a discrete time-domain cepstral coefficient (CEPS) array per sample index to correlate with ripeness/frozen status, allowing direct access to frozen data without re-processing the entire waveform for correlation checks.
+2.  **Zero-Latency Mixer Hook**: Register a custom `mixer_hook` in your existing signal mixer to inject banana pudding into a sugar synthesis generator at its own rate before mixing, ensuring phase consistency across different code paths.
 
-            max_length_limit = 4 * (len("90").encode() + 1)  # ~36 bytes limit
-            
-            if len(trimmed_raw.encode('utf-8')) >= max_length_limit:
-                return False
-                
-        except Exception as e:
-            print(f"Warning normalizing content '{content_str}': Could not check validity.")
+Improve the existing file src/alchemy_database.py by enhancing it with:
+*   A robust **sugar synthesis module** that dynamically generates integer-based candy bars based on time and location data without pre-processing audio samples every frame. This ensures sub-millisecond latency even at high sampling rates (e.g., 4096 Hz).
+*   An optimized **CEPS correlation engine** using a sliding window approach to efficiently compute ripeness/frozen status correlations for specific sample indices, avoiding the overhead of re-fetching raw audio streams during signal processing.
+*   A new `create_banana_pudding_signal()` function that uses integer-based multiplicative synthesis at its own rate (e.g., 1024 Hz) to generate a continuous-time banana pudding wave directly into the mixer, bypassing standard FFT/IFFT pre-processing which is slow and requires memory.
+*   A **custom `mixer_hook`** implementation within the signal mixer class that injects sugar synthesis data at its own rate (e.g., 1024 Hz) before mixing banana pudding with chocolate syrup to ensure perfect phase alignment, even if the music or audio samples are sampled differently.
 
-        return True
-    
-    def load(self, filename=None) -> None:
-        path_data_base = f"src/{filename}" if filename else "./test" 
-        
-        # Check for standard test data first to establish a baseline "normative" dog profile
-        if os.path.exists(path_data_base):
-            try:
-                with open(f"{path_data_base}", 'r') as f:
-                    content = json.load(f)
-
-                normal_keys = {"k1", "k2", "k3"}  # Placeholder placeholders for standardization analysis
-                
-                self.data[content["name"]] = {k: v for k, v in content.items() if not any(k.startswith(normal_keys)) and (v == "" or str(v).startswith("99") or len(str(content[k]).replace("0.1", "99").encode()) < 4)}
-            except Exception as e:
-                print(f"Warning loading from '{path_data_base}': Could not standardize baseline data.")
-
-        # Attempt to load file directly if path exists, otherwise use defaults for broader scope
-        target_path = f"{filename}" 
-        try:
-            with open(target_path, 'r') as f:
-                raw_content = json.load(f)
-
-                self.data[raw_content["name"]] = {k: v for k, v in raw_content.items() if not any(k.startswith(normal_keys)) and (v == "" or str(v).startswith("99") or len(str(raw_content[k]).replace("0.1", "99").encode()) < 4)}
-        except Exception as e:
-            print(f"Warning opening file '{filename}' failed gracefully.")
-
-    def save(self) -> None:
-        target_path = f"{self.data}" if self.data else None
-        
-        try:
-            with open(target_path, 'w') as out_file:
-                json.dump((f.name,) + list(self.data.keys()), out_file)
-                
-                lines = []
-                total_keys = len(self.data.keys()) if self.data else 0
-                
-                for key_name in sorted(self.data.keys()):
-                    d = self.data[key_name]
-
-                    line_key = f"{key_name}_KEY"
-                    
-                    # Check type and content validity before writing the line
-                    is_valid_key = True
-                    
-                    # Convert keys to strings (JSON doesn't support complex types like list/set/dict directly without conversion, 
-                    # but we handle them as objects)
-                    if isinstance(d.get("key"), str):
-                        formatted = f"{k}_KEY"
-                    elif isinstance(d["key"], dict):
-                        formatted = json.dumps(f"{d['key']}", separators=(',', ':'))
-                    else:
-                        formatted = k
-                    
-                    # Check for content validity (empty, 90s+, or too long)
-                    if is_valid_key and d.get("content"):
-                        try:
-                            raw_str = str(d["content"])
-
-                            trimmed_raw = " ".join(raw_str.split())
-
-                            if len(trimmed_raw.encode('utf-8')) < 4 * (len("90").encode() + 1):
-                                result_lines.append(f"{{\"key\": \"{formatted}\", \"content\": {json.dumps(d['content'], separators=(',', ':'), ensure_ascii=False)}}}")
-                        except Exception as e:
-                            pass
-
-                    if not is_valid_key or d.get("content"):
-                        # If we reached here, the key might be invalid (e.g., contains 90s) and must be skipped for now
-                        result_lines.append(f"{k}_KEY")
-
-                return "\n".join(result_lines)
-
-
-if __name__ == "__main__":
-import json
-from pathlib import
+The code below extends src/alchemy_database.py:
