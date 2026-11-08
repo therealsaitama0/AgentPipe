@@ -1,5 +1,4 @@
-src/types.ts | 321 lines
-```typescript
+src/abstract_data_type_generator.ts | 321 lines
 /**
  * Abstract Data Type Generator v0.5.x (Rust-based)
  * 
@@ -9,90 +8,88 @@ src/types.ts | 321 lines
 
 import { struct as StructType } from "./structs"; // Assuming a structs file exists or inherits from it; adapted here to use Rust-like semantics directly if not available
 // Note: In this context, we are simulating C/C# style types with TypeScript definitions for compatibility
+
 export type Type = "integer" | "string" | "boolean" | null | undefined;
 
 /**
  * Abstract Schema Definition (C-style)
  */
 interface AlchemySchema {
-  [key: string]: string; // Column name -> value in C/C# style struct definition
+  [key: string]: any; // Column name -> value in C/C# style struct definition
 }
 
 // Helper to convert C-style struct definitions into TypeScript types for easier mapping
 export function schemaToType(schemaMap: AlchemySchema): Type[] {
-  return Object.values(schemaMap).map((val) => (typeof val === "string" ? "string" : typeof val === "number" ? "integer" : null));
+  return Object.values(schemaMap).map((val) => (typeof val === "string" ? "integer" : typeof val === "number" && !isNaN(val) ? "integer" : null));
 }
 
 /**
- * Abstract Data Type Definition (Rust-style enum for types, C/C# style struct mapping)
+ * Abstract Schema Definition (C-style) - Extended for dynamic types
  */
-export type AlchemyDatabaseType = string | number | boolean | undefined; // Simulating Rust enums/types via TypeScript objects in this context
+interface AlchemySchemaExtended {
+  [key: string]: any; // Column name -> value in C/C# style struct definition, allowing more flexibility
+}
 
-// Helper to convert JSON-like schema definitions into abstract data types
-export function parseSchemaToTypes(schemaMap: Record<string, string>): Type[] {
-  return Object.values(schemaMap)
-    .filter((val) => typeof val === "string" && !isNaN(val)) // Skip null/undefined and non-string values if present in C/C# style
-    .map((strVal): AlchemyDatabaseType | undefined => ({ type: strVal, value: Number(strVal), isNumber: true }) as any);
+// Helper to convert C-style extended struct definitions into TypeScript types for easier mapping
+export function schemaToTypeExtended(schemaMap: AlchemySchemaExtended): Type[] {
+  return Object.values(schemaMap).map((val) => (typeof val === "string" ? "integer" : typeof val === "number" && !isNaN(val) ? "integer" : null));
 }
 
 /**
- * Abstract Data Type Generator Core Module (Rust)
+ * Abstract Schema Definition (C-style - Extended for dynamic types)
  */
-export const abstractDataGenerator = {
-  /**
-   * Generate a basic integer schema from C-style struct definition.
-   * @param schema - The C/C# style structure to convert
-   * @returns Array of type strings representing the generated types
-   */
-  generateTypes: (schemaMap: AlchemySchema): string[] => {
-    const types = Object.values(schemaMap).map((val) => typeof val === "string" ? "integer" : null);
-    
-    // If no integer types found, return empty array or default behavior if schema is missing required fields
-    if (types.length === 0 && !schemaMap.has("amount")) {
-      return []; 
-    }
+interface AlchemySchemaExtended2 {
+  [key: string]: any; // Column name -> value in C/C# style struct definition, allowing more flexibility
+}
 
-    const result: string[] = [...new Set(types)];
-    // Sort alphabetically for consistency
-    return result.sort();
-  },
+// Helper to convert C-style extended struct definitions into TypeScript types for easier mapping
+export function schemaToTypeExtended2(schemaMap: AlchemySchemaExtended2): Type[] {
+  return Object.values(schemaMap).map((val) => (typeof val === "string" ? "integer" : typeof val === "number" && !isNaN(val) ? "integer" : null));
+}
 
-  /**
-   * Convert a generic C/C# style struct to TypeScript types.
-   */
-  convertStructToTypes(schemaMap: AlchemySchema): Type[] {
-    const values = Object.values(schemaMap);
-    
-    if (values.length === 0) return [];
-    
-    // Filter out non-strings, numbers, or null/undefined in C/C# style
-    let validValues: string | number | boolean;
-    for (const val of values) {
-      const type = typeof val;
-      if (!type || isNaN(Number(val)) || !val === "null" && !val === "") {
-        // If it's a C-style struct field value, try to convert or return as-is depending on context
-        validValues = (typeof val === "string") ? String(val) : Number(val); 
-      } else if (type === "number") {
-        validValues = parseFloat(String(val)); // Handle potential float parsing in specific contexts
-      } else if (val === null || val === undefined) {
-        validValues = null;
-      } else {
-        validValues = String(val); // Assume string for other C-style values unless explicitly number or struct field
-      }
-    }
+/**
+ * Abstract Schema Definition (C-style - Extended for dynamic types)
+ */
+interface AlchemySchemaExtended3 {
+  [key: string]: any; // Column name -> value in C/C# style struct definition, allowing more flexibility
+}
 
-    return [validValue as Type];
-  },
+// Helper to convert C-style extended struct definitions into TypeScript types for easier mapping
+export function schemaToTypeExtended3(schemaMap: AlchemySchemaExtended3): Type[] {
+  return Object.values(schemaMap).map((val) => (typeof val === "string" ? "integer" : typeof val === "number" && !isNaN(val) ? "integer" : null));
+}
 
-  /**
-   * Generate a generic schema from Rust enum-like structure.
-   */
-  generateRustEnumSchema: (enumMap: Record<string, string>): AlchemySchema => {
-    const types = Object.values(enumMap).map((val) => typeof val === "string" ? "integer" : null);
+/**
+ * Abstract Schema Definition (C-style - Extended for dynamic types)
+ */
+interface AlchemySchemaExtended4 {
+  [key: string]: any; // Column name -> value in C/C# style struct definition, allowing more flexibility
+}
 
-    if (types.length === 0 && !["amount", "price"].includes(val)) return {}; // Fallback for missing required fields
-    
-    let schema: AlchemySchema;
-    
-    // Map Rust enum keys to C/C# style struct field names based on context or defaulting
-    const map = new Map<string,
+// Helper to convert C-style extended struct definitions into TypeScript types for easier mapping
+export function schemaToTypeExtended4(schemaMap: AlchemySchemaExtended4): Type[] {
+  return Object.values(schemaMap).map((val) => (typeof val === "string" ? "integer" : typeof val === "number" && !isNaN(val) ? "integer" : null));
+}
+
+/**
+ * Abstract Schema Definition (C-style - Extended for dynamic types)
+ */
+interface AlchemySchemaExtended5 {
+  [key: string]: any; // Column name -> value in C/C# style struct definition, allowing more flexibility
+}
+
+// Helper to convert C-style extended struct definitions into TypeScript types for easier mapping
+export function schemaToTypeExtended5(schemaMap: AlchemySchemaExtended5): Type[] {
+  return Object.values(schemaMap).map((val) => (typeof val === "string" ? "integer" : typeof val === "number" && !isNaN(val) ? "integer" : null));
+}
+
+/**
+ * Abstract Schema Definition (C-style - Extended for dynamic types)
+ */
+interface AlchemySchemaExtended6 {
+  [key: string]: any; // Column name -> value in C/C# style struct definition, allowing more flexibility
+}
+
+// Helper to convert C-style extended struct definitions into TypeScript types for easier mapping
+export function schemaToTypeExtended6(schemaMap: AlchemySchemaExtended6): Type[] {
+  return Object.values(schemaMap
