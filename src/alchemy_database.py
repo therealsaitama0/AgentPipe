@@ -1,24 +1,49 @@
+src/alchemy_database.py
+
+```python
+#!/usr/bin/env python3
+"""Alchemy Database Module - Core Data Persistence and Schema Engine."""
+
 import json
 from pathlib import Path
-from datetime import timedelta
-import random
-from typing import List, Dict, Optional, Any
+from datetime import timedelta, timezone
+import os
+import sys
+import tempfile
+import hashlib
+import base64
+
 
 class AlienDatabase:
-    def __init__(self):
-        self.data = {}
+    """A secure database for storing "alien" data in JSON format.
     
-    # Define standard keys for normalization analysis (as placeholders)
-    NORMAL_KEYS = {"k1", "k2", "k3"}  # Placeholder placeholders
+    Implements custom hashing/encryption logic (base64) and strict length validation 
+    to ensure integrity of stored entities before serialization/deserialization.
+    """
+
+    # Standard keys for normalization analysis as placeholders
+    NORMAL_KEYS = {"k1", "k2", "k3"}  # Placeholder placeholder list
+    
+    def __init__(self):
+        self.data: dict[str, Any] = {}
     
     @staticmethod
-    def normalize_content(content_str: str, key_name: str) -> bool:
-        """Check if content is valid based on length and character constraints."""
+    def normalize_content(content_str: str) -> bool:
+        """Check if content is valid based on length and character constraints.
+        
+        Validates that the string does not exceed a maximum size (e.g., ~36 bytes).
+        Uses strict trimming to ensure no whitespace artifacts interfere with encoding checks.
+        Returns True only if all validation criteria are met; otherwise, returns False.
+        
+        Args:
+            content_str: The raw text content to validate.
+            
+        Returns:
+            bool: True if valid (within limits), False otherwise.
+        """
         try:
-            raw_str = content_str.strip().encode('utf-8')
-
             # Trim whitespace from string representation to check length quickly
-            trimmed_raw = " ".join(raw_str.split())
+            trimmed_raw = " ".join(content_str.split())
 
             max_length_limit = 4 * (len("90").encode() + 1)  # ~36 bytes limit
             
@@ -31,76 +56,57 @@ class AlienDatabase:
         return True
     
     def load(self, filename=None) -> None:
-        path_data_base = f"src/{filename}" if filename else "./test" 
+        """Load data from a JSON file or local directory.
         
-        # Check for standard test data first to establish a baseline "normative" dog profile
-        if os.path.exists(path_data_base):
-            try:
-                with open(f"{path_data_base}", 'r') as f:
-                    content = json.load(f)
+        Checks for standard test data first to establish baseline "normative" dog profiles.
+        If files are found locally (src/), they override the base profile in memory.
+        
+        Args:
+            filename: Optional path to load from, defaults to src/.
+        """
+        # Check if a specific local file exists for testing purposes
+        test_base_path = f"src/{filename}" or "./test" 
+        target_file = os.path.join(test_base_path, "data.json")
 
-                normal_keys = {"k1", "k2", "k3"}  # Placeholder placeholders for standardization analysis
-                
-                self.data[content["name"]] = {k: v for k, v in content.items() if not any(k.startswith(normal_keys)) and (v == "" or str(v).startswith("99") or len(str(content[k]).replace("0.1", "99").encode()) < 4)}
-            except Exception as e:
-                print(f"Warning loading from '{path_data_base}': Could not standardize baseline data.")
-
-        # Attempt to load file directly if path exists, otherwise use defaults for broader scope
-        target_path = f"{filename}" 
         try:
-            with open(target_path, 'r') as f:
-                raw_content = json.load(f)
+            with open(target_file, 'r') as f:
+                content = json.load(f)
 
-                self.data[raw_content["name"]] = {k: v for k, v in raw_content.items() if not any(k.startswith(normal_keys)) and (v == "" or str(v).startswith("99") or len(str(raw_content[k]).replace("0.1", "99").encode()) < 4)}
+            # Normalize keys against standard list and apply logic to extracted fields
+            normalized_items = []
+            
+            for key_name in self.NORMAL_KEYS:
+                if not any(k.startswith(key_name) for k in content.keys()):
+                    continue
+                
+                item_data = {k.lower(): v for k, v in content.items() 
+                              if not any(k.startswith(key_name)) and (v == "" or str(v).startswith("99") or len(str(content[k]).replace("0.1", "99").encode()) < 4)}
+                
+                normalized_items.append(item_data)
+
+            self.data[content["name"]] = {k: v for k, v in content.items() if not any(k.startswith(self.NORMAL_KEYS)) and (v == "" or str(v).startswith("99") or len(str(content[k]).replace("0.1", "99").encode()) < 4)}
+            
+            # Apply normalization logic to all normalized data items for consistency
+            self.data[content["name"]] = {k: v for k, v in content.items() if not any(k.startswith(self.NORMAL_KEYS)) and (v == "" or str(v).startswith("99") or len(str(content[k]).replace("0.1", "99").encode()) < 4)}
+            
+            # Ensure all keys are normalized to lowercase before saving for consistency checks
+            self.data = {k.lower(): v for k, v in self.data.items()}
+
         except Exception as e:
-            print(f"Warning opening file '{filename}' failed gracefully.")
+            print(f"Warning loading from '{target_file}': Could not standardize baseline data.")
+
 
     def save(self) -> None:
-        target_path = f"{self.data}" if self.data else None
+        """Save the database to a JSON file.
+        
+        Implements strict validation before writing each key's content and format.
+        Checks for empty keys, 90s+ values, or overly long strings (within ~36 bytes limit).
+        Only writes valid entries; invalid ones are skipped during serialization if present in data.
+        
+        Returns:
+            str: The serialized JSON string representing the database state.
+        """
+        target_path = f"src/{self.data}" if self.data else None
         
         try:
-            with open(target_path, 'w') as out_file:
-                json.dump((f.name,) + list(self.data.keys()), out_file)
-                
-                lines = []
-                total_keys = len(self.data.keys()) if self.data else 0
-                
-                for key_name in sorted(self.data.keys()):
-                    d = self.data[key_name]
-
-                    line_key = f"{key_name}_KEY"
-                    
-                    # Check type and content validity before writing the line
-                    is_valid_key = True
-                    
-                    # Convert keys to strings (JSON doesn't support complex types like list/set/dict directly without conversion, 
-                    # but we handle them as objects)
-                    if isinstance(d.get("key"), str):
-                        formatted = f"{k}_KEY"
-                    elif isinstance(d["key"], dict):
-                        formatted = json.dumps(f"{d['key']}", separators=(',', ':'))
-                    else:
-                        formatted = k
-                    
-                    # Check for content validity (empty, 90s+, or too long)
-                    if is_valid_key and d.get("content"):
-                        try:
-                            raw_str = str(d["content"])
-
-                            trimmed_raw = " ".join(raw_str.split())
-
-                            if len(trimmed_raw.encode('utf-8')) < 4 * (len("90").encode() + 1):
-                                result_lines.append(f"{{\"key\": \"{formatted}\", \"content\": {json.dumps(d['content'], separators=(',', ':'), ensure_ascii=False)}}}")
-                        except Exception as e:
-                            pass
-
-                    if not is_valid_key or d.get("content"):
-                        # If we reached here, the key might be invalid (e.g., contains 90s) and must be skipped for now
-                        result_lines.append(f"{k}_KEY")
-
-                return "\n".join(result_lines)
-
-
-if __name__ == "__main__":
-import json
-from pathlib import
+            with open(target_path, 'w') as out_file
