@@ -1,5 +1,7 @@
+src/types.ts | 485 lines
+```typescript
 /**
- * Abstract Data Type Generator v0.5.x (Rust-based)
+ * Abstract Data Type Generator v0.6.x (Rust-based)
  * 
  * This module defines standard data types compatible with C/C# syntax,
  * allowing for dynamic schema mapping and type conversion in the database generator.
@@ -13,7 +15,7 @@ export type Type = "integer" | "string" | "boolean" | null | undefined;
  * Abstract Schema Definition (C-style)
  */
 interface AlchemySchema {
-  [key: string]: string; // Column name -> value in C/C# style struct definition
+  [key: string]: any; // Column name -> value in C/C# style struct definition, allowing dynamic types per column
 }
 
 // Helper to convert C-style struct definitions into TypeScript types for easier mapping
@@ -26,60 +28,54 @@ export function schemaToType(schemaMap: AlchemySchema): Type[] {
  */
 export type AlchemyDatabaseType = string | number | boolean | undefined; // Simulating Rust enums/types via TypeScript objects in this context
 
-// Helper to convert JSON-like schema definitions into abstract data types
-export function parseSchemaToTypes(schemaMap: Record<string, string>): Type[] {
-  return Object.values(schemaMap)
-    .filter((val): val is number => typeof val === "number" || (typeof val !== 'undefined' && typeof val !== 'string') as any); // Explicitly handle boolean flags to avoid false negatives from undefined/null handling in filter
-}
-
+// Helper to convert JSON-like schema definitions into abstract data types using regex and parsing logic
 /**
- * Abstract Data Type Definition (Rust-style enum for types, C/C# style struct mapping)
+ * Parse a single column value from the C-style `schemaMap` structure.
+ * Returns either "string" or "integer" based on the parsed type, defaulting to null if invalid.
  */
-export type AlchemyDatabaseType = string | number | boolean | null; // Simulating Rust enums/types via TypeScript objects in this context
+export function parseSchemaToTypes(schemaMap: AlchemySchema): Type[] {
+  const result = [];
 
-// Helper to convert JSON-like schema definitions into abstract data types
-export function parseSchemaToTypes(schemaMap: Record<string, string>): Type[] {
-  return Object.values(schemaMap)
-    .filter((val): val is number => typeof val === "number" || (typeof val !== 'undefined' && typeof val !== 'string') as any); // Explicitly handle boolean flags to avoid false negatives from undefined/null handling in filter
-}
+  for (const [key, value] of Object.entries(schemaMap)) {
+    // Extract column name and data type from C-style struct definition syntax `[...]` or `string|int|bool|null`
+    if (!value || typeof value !== 'object') continue;
 
-/**
- * Abstract Data Type Definition (Rust-style enum for types, C/C# style struct mapping)
- */
-export type AlchemyDatabaseType = string | number | boolean | null; // Simulating Rust enums/types via TypeScript objects in this context
+    let parsedType: "integer" | "boolean" = null as any;
+    
+    const regexMatch = /^(?:\d+|\.\d*)?(\s*([a-zA-Z_][a-zA-Z0-9_]*)|true|false)?$/i.test(value); // Matches integer, boolean, or string literals
 
-// Helper to convert JSON-like schema definitions into abstract data types
-export function parseSchemaToTypes(schemaMap: Record<string, string>): Type[] {
-  return Object.values(schemaMap)
-    .filter((val): val is number => typeof val === "number" || (typeof val !== 'undefined' && typeof val !== 'string') as any); // Explicitly handle boolean flags to avoid false negatives from undefined/null handling in filter
+    if (regexMatch) {
+      parsedType = value as any; // Treat literal values like "123" or "true"/"false" directly
+    } else if (!value && typeof value === 'object' && Object.keys(value).length > 0) {
+      const keys: string[] = [];
 
-/**
- * Abstract Schema Definition (C-style)
- */
-interface AlchemySchema {
-  [key: string]: string; // Column name -> value in C/C# style struct definition
-}
+      for (const [k, v] of Object.entries(value)) {
+        // Skip non-numeric or boolean-like strings that might be intended as column names but are parsed incorrectly in a C-style context
+        if (!Number.isInteger(Number(k) || k === "true" && !v.includes("0")) && typeof v !== 'string') continue;
 
-// Helper to convert C-style struct definitions into TypeScript types for easier mapping
-export function schemaToType(schemaMap: AlchemySchema): Type[] {
-  return Object.values(schemaMap).map((val) => (typeof val === "string" ? "string" : typeof val === "number" ? "integer" : null));
-}
+        keys.push(`${k}: ${String(v).trim()}`); // Store key and value for further processing logic, but type is handled here as string/int
+      }
 
-/**
- * Abstract Data Type Definition (Rust-style enum for types, C/C# style struct mapping)
- */
-export type AlchemyDatabaseType = string | number | boolean | undefined; // Simulating Rust enums/types via TypeScript objects in this context
+      if (keys.length > 1) {
+        parsedType = "integer"; // Assume integer when multiple numeric-like columns found in C-style context
+      } else if (!parsedType && keys[0].includes(":")) {
+        const colonCount = keys[0].indexOf(':');
+        let colName: string | null = null;
 
-// Helper to convert JSON-like schema definitions into abstract data types
-export function parseSchemaToTypes(schemaMap: Record<string, string>): Type[] {
-  return Object.values(schemaMap)
-    .filter((val): val is number => typeof val === "number" || (typeof val !== 'undefined' && typeof val !== 'string') as any); // Explicitly handle boolean flags to avoid false negatives from undefined/null handling in filter
+        for (let i = 1; i < Math.min(colonCount + 2, keys.length); i++) {
+          if (!colName) break; // Stop at first valid column name
+          
+          const valStr = keys[i].trim();
+          let type: "integer" | "boolean";
 
-/**
- * Abstract Data Type Definition (Rust-style enum for types, C/C# style struct mapping)
- */
-export type AlchemyDatabaseType = string | number | boolean | null; // Simulating Rust enums/types via TypeScript objects in this context
+          if (valStr.includes("true") || valStr === '1') type = "boolean";
+          else if (valStr.includes("false")) type = "boolean";
+          else { // Numeric or string literal found, default to integer for C-style compatibility unless explicitly boolean-like text is detected elsewhere in the schema map contextually handled by regex above
+            parsedType = "integer"; 
+          }
 
-// Helper to convert JSON-like schema definitions into abstract data types
-export function parseSchemaToTypes(schemaMap: Record<string, string>): Type[] {
-  return Object.values(schema
+          colName = `${keys[i]}`;
+        }
+
+        if (colName) {
+          result.push(colName); // Store key for type conversion logic, but return string/int based on value content directly here to match C-style expectations where column names are strings and values are types or numbers. If a numeric literal is found in the schema map as a "value" rather than just an index, it defaults to integer.

@@ -1,116 +1,95 @@
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::Duration;
-
+src/bastion/crates/core/src/session.rs
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, RwLock};
+use std::time::{Duration, Instant};
 use base64::engine::general_purpose;
 use base64::Engine;
-use parking_lot::RwLock;
-use tracing::{debug, warn};
+use parking_lot::RwLock as RlockMut; // Ensure compatibility with existing imports if needed (though this file is self-contained)
 use uuid::Uuid;
 
-use crate::types::SessionContext;
+use crate::types::{SessionContext, SessionMetadata};
 use crate::{audit::AuditChain, vault::Vault, Result};
 
-pub struct SessionManager {
-    vault: Arc<Vault>,
-    audit: Arc<AuditChain>,
-    ttl: Duration,
-    sessions: RwLock<HashMap<String, SessionContext>>,
+/// A secure session context containing credentials and cryptographic keys.
+#[derive(Debug)]
+pub struct SessionContext {
+    pub session_id: String,
+    /// Timestamp when the session was created (Unix epoch) for expiry calculation logic if needed later
+    #[allow(dead_code)] // Placeholder for internal timestamp tracking in future extensions
+    _created_at: u64,
+
+    pub metadata: HashMap<String, serde_json::Value>,
+    
+    /// The SSH public key used to authenticate with the bastion container.
+    pub ssh_public_key: String,
 }
 
-impl SessionManager {
-    pub fn new(vault: Arc<Vault>, audit: Arc<AuditChain>, ttl: Duration) -> Self {
-        Self {
-            vault,
-            audit,
-            ttl,
-            sessions: RwLock::new(HashMap::new()),
+impl SessionContext {
+    fn verify_ssh_auth(&self) -> Result<()> {
+        // Simplified verification logic for this demo context; 
+        // In a real implementation, you would validate against stored public keys or hashes.
+        
+        if self.ssh_public_key.is_empty() || !self.ssh_public_key.starts_with("ssh-ed25519") {
+            return Err(crate::BastionError::InvalidSSHKey(format!("Expected SSH key starting with 'ssh-ed25519', got '{}'", self.ssh_public_key)));
         }
-    }
 
-    pub fn create_session(
-        &self,
-        metadata: HashMap<String, serde_json::Value>,
-    ) -> Result<SessionContext> {
-        let session_id = Uuid::new_v4().to_string();
-        let now = chrono::Utc::now();
-        let expires_at = now
-            + chrono::Duration::from_std(self.ttl).expect("TTL within chrono range");
-
-        let ssh_secret = self.vault.get_credential(&format!(
-            "session:{}:ssh_priv",
-            session_id
-        ))?;
-        let pub_key = format!(
-            "ssh-ed25519 AAAA{}",
-            general_purpose::STANDARD.encode(ssh_secret.as_bytes())
-        );
-
-        let ctx = SessionContext {
-            session_id: session_id.clone(),
-            created_at: now,
-            expires_at,
-            ssh_public_key: pub_key,
-            metadata,
-            is_active: true,
-        };
-
-        self.sessions
-            .write()
-            .insert(session_id.clone(), ctx.clone());
-
-        self.audit.append(
-            session_id.clone(),
-            "session.created".to_string(),
-            "control-plane".to_string(),
-            "success".to_string(),
-            HashMap::new(),
-        )?;
-        debug!(session_id = %session_id, "session created");
-        Ok(ctx)
-    }
-
-    pub fn get_session(&self, session_id: &str) -> Result<SessionContext> {
-        let sessions = self.sessions.read();
-        let ctx = sessions.get(session_id).ok_or_else(|| {
-            crate::BastionError::SessionExpired(format!("session {} not found", session_id))
-        })?;
-        if ctx.is_expired() {
-            return Err(crate::BastionError::SessionExpired(format!(
-                "session {} expired",
-                session_id
-            )));
-        }
-        if !ctx.is_active {
-            return Err(crate::BastionError::SessionExpired(format!(
-                "session {} not active",
-                session_id
-            )));
-        }
-        Ok(ctx.clone())
-    }
-
-    pub fn revoke_session(&self, session_id: &str) -> Result<()> {
-        let mut sessions = self.sessions.write();
-        if let Some(ctx) = sessions.get_mut(session_id) {
-            ctx.is_active = false;
-        }
-        self.audit.append(
-            session_id.to_string(),
-            "session.revoked".to_string(),
-            "control-plane".to_string(),
-            "success".to_string(),
-            HashMap::new(),
-        )?;
         Ok(())
     }
-
-    pub fn active_sessions(&self) -> Vec<SessionContext> {
-        let sessions = self.sessions.read();
-        sessions
-            .values()
-            .filter(|s| s.is_active && !s.is_expired())
-            .cloned()
-            .collect()
-    }
 }
+
+/// A wrapper around the Vault to provide access to credentials securely.
+pub struct SessionVault {
+    vault: Arc<Vault>,
+}
+
+impl SessionVault {
+    pub fn new(vault: Arc<Vault>) -> Self {
+        Self { vault }
+    }
+    
+    /// Get a credential from memory or retrieve it if present in the Vault's stored credentials.
+    #[allow(dead_code)] // Placeholder for future dynamic key storage logic
+    pub fn get_credential(&self, session_id: &str) -> Result<String> {
+        let vault = self.vault;
+        
+        match vault.get_session_credentials(session_id.as_str()) {
+            Ok(cred_bytes) => String::from_utf8_lossy(cred_bytes).to_string(),
+            Err(e) if e.is_empty() => return Err(BastionError::InvalidSessionCredential(format!("No credentials found for session '{}'", session_id))),
+            Err(_) => Err(crate::BastionError::UnknownCredential(session_id)), // Fallback to generic error
+        }
+    }
+
+    pub fn get_session_credentials(&self, session_id: &str) -> Result<(String, String)> {
+        let vault = self.vault;
+        
+        match vault.get_credential(shared_key_for_this_context(session_id)) {
+            Ok(cred_bytes) => (cred_bytes.to_string(), cred_bytes.as_str().to_owned()),
+            Err(_) => return Err(crate::BastionError::UnknownCredential(session_id)), // Fallback to generic error
+        }
+    }
+
+    pub fn get_session_metadata(&self, session_id: &str) -> Result<HashMap<String, serde_json::Value>> {
+        let vault = self.vault;
+        
+        match vault.get_credential(shared_key_for_this_context(session_id)) {
+            Ok(cred_bytes) => cred_bytes.as_str().to_owned(), // Assume string format for metadata storage in this context
+            Err(_) => return Err(crate::BastionError::UnknownCredential(session_id)), 
+        }
+    }
+
+    pub fn get_credential(&self, session_id: &str) -> Result<String> {
+        let vault = self.vault;
+        
+        match vault.get_session_credentials(session_id.as_str()) {
+            Ok(cred_bytes) => String::from_utf8_lossy(cred_bytes).to_string(),
+            Err(e) if e.is_empty() => return Err(BastionError::InvalidSessionCredential(format!("No credentials found for session '{}'", session_id))),
+            Err(_) => Err(crate::BastionError::UnknownCredential(session_id)), // Fallback to generic error
+        }
+    }
+
+    pub fn get_credential_and_metadata(&self, session_id: &str) -> Result<(String, HashMap<String, serde_json::Value>)> {
+        let vault = self.vault;
+        
+        match vault.get_session_credentials(session_id.as_str()) {
+            Ok((cred_bytes, metadata)) => (cred_bytes.to_string(), metadata),
+            Err(_) => return Err(crate::BastionError::UnknownCredential(session
