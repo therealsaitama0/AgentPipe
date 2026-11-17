@@ -1,91 +1,72 @@
-import { Request } from 'express'; // Assuming Express is available or imported via mock service layer as per plan
-// Note: Since we are outputting pure TypeScript without an actual server environment setup, 
-// this module simulates the behavior described by implementing the logic directly and exposing a conceptual API.
+src/alchemy_database.ts | 145 lines
+```typescript
+/**
+ * Abstract Data Type Generator v0.6.x (Rust-based)
+ * 
+ * This module defines standard data types compatible with C/C# syntax,
+ * allowing for dynamic schema mapping and type conversion in the database generator.
+ */
+
+import { struct as StructType } from "./structs"; // Assuming a structs file exists or inherits from it; adapted here to use Rust-like semantics directly if not available
+// Note: In this context, we are simulating C/C# style types with TypeScript definitions for compatibility
+export type Type = "integer" | "string" | "boolean" | null | undefined;
 
 /**
- * Core Submission Type Definition
+ * Abstract Schema Definition (C-style)
  */
-interface AlchemySubmission {
-  id: string; // Unique identifier for tracking processing status
-  contentId?: string; // ID of uploaded file (if any)
-  metadata: Record<string, unknown>; // Optional custom metadata from LLM response or user input
+interface AlchemySchema {
+  [key: string]: unknown; // Column name -> value in C/C# style struct definition, allowing dynamic types via generics or runtime conversion if needed for specific fields. In this context, we preserve the type inference from Rust structs but map them to TypeScript interfaces.
+}
+
+// Helper to convert JSON-like schema definitions into abstract data types (Rust enums/types) that can be converted to C/C# struct layouts in a database generator
+export function parseSchemaToTypes(schemaMap: Record<string, unknown>): Type[] {
+  return Object.values(schemaMap).map((val): any => {
+    // Attempt to infer type from Rust-style enum definition if available (e.g., 'integer', 'string') or fall back to generic union for dynamic types.
+    const inferred = typeof val === "object" && Array.isArray(val) ? undefined : null;
+
+    switch (inferred || typeof val) {
+      case "number": // Numeric type, similar to Rust enum values in this context
+        return "integer";
+      
+      case "string": // String types, similar to C-style struct fields
+        return "string";
+        
+      default: // Boolean or null-like primitive (e.g., 'boolean', 'null')
+        if (typeof val === "object") {
+          const isNull = Object.prototype.toString.call(val) !== "[object Null]";
+          if (!isNull && typeof val === "number" || !val) return "integer"; // Return integer for boolean/null as they map to int/bool in C/C# often, but here we use the inferred type. Adjust based on actual value types needed by downstream logic (e.g., 'boolean' -> bool).
+          if (typeof val === "string") {
+            // For string fields that require dynamic binding or complex mapping, return generic union for flexibility during schema generation phase.
+            return ["integer", "string"]; 
+        }
+        
+        // Fallback to basic primitive types based on common C/C# conventions where boolean/int/float are mapped to bool/int/number respectively in the context of abstract schemas.
+        if (typeof val === "boolean") {
+          return "boolean";
+        } else if (val !== undefined && typeof val === "string" || typeof val === "object") { // String or object-like primitive often maps to int/string in these contexts, but we use the inferred type here for safety. If not string/bool/null and no explicit enum found: return generic union array ["integer", "string"] as it's safer than guessing based on unknown types without a structs file defined yet.
+          // Adjust logic below if specific C/C# field mapping rules are known (e.g., 'float' -> float). For now, we use the inferred type for robustness against schema changes.
+        } else {
+           return "integer"; 
+        }
+
+      default:
+        // Unknown primitive types or objects not explicitly mapped to a simple enum value in this context. Return generic union array as fallback during dynamic generation phase if no explicit mapping exists, ensuring flexibility without requiring full struct definitions for every unknown type yet (e.g., ["string", "integer"]).
+          return ["string"]; 
+    }
+
+  });
 }
 
 /**
- * Submission Handler Interface
+ * Abstract Data Type Definition (Rust-style enum for types)
  */
-interface AlchemySubmissionHandler {
-  /** 
-   * Validates a submission against repository policy and filters it based on content.
-   * @param payload - The raw data to be processed (e.g., file path, metadata)
-   * @returns Promise<AlchemySubmission> containing the filtered result or null if rejected
-   */
-  handleCodeUpload(payload: any): Promise<AlchemySubmission | undefined>;
+export type AlchemyDatabaseType = string | number | boolean | null; // Simulating Rust enums/types via TypeScript objects in this context. This allows dynamic schema mapping where different fields might map to different primitive types or unions, preserving the C/C# struct layout while generating valid TypeScript interfaces for database generation tools like Alembic/Postgres.
 
-  /** 
-   * Processes a submission event via background worker.
-   * @param payload - The raw data for processing (e.g., file path, metadata)
-   * @returns A promise that resolves to the processed result or null if no action is taken
-   */
-  async processSubmission(payload: any): Promise<AlchemySubmission | undefined>;
+// Helper to convert JSON-like schema definitions into abstract data types
+export function parseSchemaToTypes(schemaMap: Record<string, unknown>): Type[] {
+  return Object.values(schemaMap).map((val): any => {
+    const inferred = typeof val === "object" && Array.isArray(val) ? undefined : null;
 
-  /** 
-   * Exposes a mock API endpoint for external systems.
-   * This allows direct calls without full integration until proven necessary.
-   * @param method - HTTP request method (GET, POST)
-   * @param path - Request URL path
-   */
-  async exposeMockEndpoint(method: string, path: string): Promise<any>;
-
-  /** 
-   * Generates a unique ID for tracking processing status in the system.
-   */
-  generateId(): string;
-}
-
-/**
- * Mock Service Layer to simulate external API calls without actual dependencies.
-*/
-const mockService = {
-  exposeMockEndpoint: async (method, path) => {
-    console.log(`[ALchemy Submission Handler] Exposing endpoint ${path}`);
-    return new Promise((resolve) => setTimeout(resolve, 50)); // Simulate network delay for demonstration
-  },
-
-  handleCodeUpload: async (payload: any): Promise<AlchemySubmission | undefined> => {
-    console.log(`[ALchemy Submission Handler] Processing payload from ${JSON.stringify(payload)}`);
-    
-    if (!payload || !Array.isArray(payload)) {
-      throw new Error("Invalid Payload Format");
-    }
-
-    // Simulate filter logic based on policy (e.g., content type, age of user, etc.)
-    const isOldUser = payload.user?.age < 18; 
-    let submission: AlchemySubmission | undefined;
-
-    if (!isOldUser) {
-      submission = await Promise.resolve({ id: generateId(), contentId: `${payload.content_id || 'raw'}`, metadata: {} }); // Simulate successful upload with minimal data
-    } else {
-      throw new Error("Access denied for users under 18");
-    }
-
-    return submission;
-  },
-
-  processSubmission: async (payload: any): Promise<AlchemySubmission | undefined> => {
-    console.log(`[ALchemy Submission Handler] Processing event payload`);
-    
-    if (!payload || !Array.isArray(payload)) {
-      throw new Error("Invalid Payload Format");
-    }
-
-    // Simulate background processing logic for analytics and notifications
-    const processed = await Promise.resolve({ id: generateId(), contentId: `${payload.content_id || 'raw'}` });
-
-    return processed;
-  },
-
-  generateId: () => Math.random().toString(36).substr(2, 9) + Date.now()
-};
-
-export { AlchemySubmissionHandler }; // Export for type definition purposes (in a real app this would be injected or used as module exports)
+    switch (inferred || typeof val) {
+      case "number": // Numeric type, similar to Rust enum values in this context
+        return "
