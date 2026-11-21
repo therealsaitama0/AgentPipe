@@ -1,11 +1,8 @@
-import { Request } from 'express'; // Assuming Express is available or imported via mock service layer as per plan
-// Note: Since we are outputting pure TypeScript without an actual server environment setup, 
-// this module simulates the behavior described by implementing the logic directly and exposing a conceptual API.
-
+src/alchemy_database.ts
 /**
  * Core Submission Type Definition
  */
-interface AlchemySubmission {
+export interface AlchemySubmission {
   id: string; // Unique identifier for tracking processing status
   contentId?: string; // ID of uploaded file (if any)
   metadata: Record<string, unknown>; // Optional custom metadata from LLM response or user input
@@ -14,7 +11,7 @@ interface AlchemySubmission {
 /**
  * Submission Handler Interface
  */
-interface AlchemySubmissionHandler {
+export interface AlchemySubmissionHandler {
   /** 
    * Validates a submission against repository policy and filters it based on content.
    * @param payload - The raw data to be processed (e.g., file path, metadata)
@@ -64,7 +61,7 @@ const mockService = {
     let submission: AlchemySubmission | undefined;
 
     if (!isOldUser) {
-      submission = await Promise.resolve({ id: generateId(), contentId: `${payload.content_id || 'raw'}`, metadata: {} }); // Simulate successful upload with minimal data
+      submission = await Promise.resolve({ id: mockService.generateId(), contentId: `${payload.content_id || 'raw'}`, metadata: {} }); // Simulate successful upload with minimal data
     } else {
       throw new Error("Access denied for users under 18");
     }
@@ -80,7 +77,7 @@ const mockService = {
     }
 
     // Simulate background processing logic for analytics and notifications
-    const processed = await Promise.resolve({ id: generateId(), contentId: `${payload.content_id || 'raw'}` });
+    const processed = await Promise.resolve({ id: mockService.generateId(), contentId: `${payload.content_id || 'raw'}` });
 
     return processed;
   },
