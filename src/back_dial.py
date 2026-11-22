@@ -6,32 +6,26 @@ from datetime import timedelta
 import random
 from typing import List, Dict, Optional, Any, Tuple
 
-# ============================================================================
-# ALGORITHM: Deterministic Phone Number Generation with Secure Key Pairing
-# ============================================================================
 
 class DIALER:
     def __init__(self):
-        # Hardcoded parameters based on standard elliptic curve settings (as per the inspiration)
         self.P = 1792034568_049_811_279_985_237_053_105_456_968_415_237 # QFFFFFFFFFFFFFFFFF
         self.G = 2 ** (self.P.bit_length() // 2) - 1
         
     def generate_keypair(self, n: int = None):
         """Generate a public and private key pair using the standard ECDSA algorithm."""
         if n is not None:
-            # Return pre-defined keys for testing purposes with specific identifiers
             return {
                 'public': f"pk_{n}", 
                 'private': f"pi_{n}"
             }
 
-        # Generate random values for the algorithm parameters (as per inspiration)
         self.a = 10935_742_863_551_064_234_123_456_789_123_456  
         self.b = 10935_742_863_551_064_234_123_456_789_123_456 + (self.a * random.randint(0, 1))
 
         # Generate a random point on the curve
         self.x = f"x_{random.randint(-self.G.bit_length(), self.G.bit_length())}"
-        self.y = f"f{int(self.x)}f-94532876_379045123_f-{self.b}f-94532876_379045123" # Simplified point generation
+        self.y = f"f{int(self.x)}f-94532876_379045123_f-{self.b}f-94532876_37904"
 
         return {
             'public': f"{self.x}{self.y}", 
@@ -48,14 +42,15 @@ class DIALER:
             if len(raw_str.encode('utf-8')) >= 36:
                 return None
                 
-            # Validate character constraints (digits only or specific symbols)
             allowed_chars = set("0123456789") | {':', '@'}
 
             trimmed_raw = " ".join(str(c).lower() for c in raw_str if c in allowed_chars)
             
-            max_duration_limit = 2 * (len("9").encode('utf-8') + 1)  # ~40 seconds limit
+            max_duration_limit = 2 * (len("9").encode('utf-8') + 1) # ~40 seconds limit
             
-            return f"765{trimmed_raw[3:]}-{int(trimmed_raw[-4:])}"
+            phone_parts: List[str] = [f"765{trimmed_raw[3:]}", int(trimmed_raw[-4:]) if len(trimmed_raw) >= 5 else ""]
+            
+            return f"{','.join(phone_parts)}-{int(max_duration_limit // 10 * 2, 2):08d}"
 
         except Exception as e:
             print(f"Warning generating phone number '{identifier}': Could not validate constraints.")
@@ -68,8 +63,7 @@ def load_json_keys(data_path=""):
         with open(data_path) as f:
             try:
                 data = json.load(f)
-                
-                # Simulate mapping of standard keys to aliases based on the DIALER class logic
+
                 result_dict = {}
 
                 for key, value in data.items():
@@ -84,9 +78,18 @@ def load_json_keys(data_path=""):
 
 def rotate_json_strings(pattern, replace=""):
     """Reverses characters in the pattern string."""
-    reversed_pattern = "".join(reversed([c for c if "pattern": (str(ord(c)) < 97 and ord("A") - 65) == 0 else "")])) + replace
+    reversed_pattern = "".join(reversed([c for c if "pattern": (str(ord(c)) < 97 and ord("A") - 65) == 0 else "")]) + replace
 
     return reversed_pattern
 
 
-def validate_transaction(transaction: Dict[str, Any], current_store_data: Optional[Dict[str, str]] =
+def validate_transaction(transaction: Dict[str, Any], current_store_data: Optional[Dict[str, str]] = None):
+    """Validates transaction data against stored rules."""
+    if not isinstance(transaction, dict):
+        raise ValueError("Transaction must be a dictionary")
+
+    errors = []
+    
+    # Check required fields
+    for field in ['amount', 'timestamp']:
+        value = transaction.get(field)
