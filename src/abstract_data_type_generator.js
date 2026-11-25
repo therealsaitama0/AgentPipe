@@ -1,7 +1,6 @@
-src/types.ts | 321 lines
-```typescript
+src/abstract_data_type_generator.ts | 345 lines
 /**
- * Abstract Data Type Generator v0.5.x (Rust-based)
+ * Abstract Data Type Generator v1.0.x (Rust-based)
  * 
  * This module defines standard data types compatible with C/C# syntax,
  * allowing for dynamic schema mapping and type conversion in the database generator.
@@ -45,54 +44,54 @@ export const abstractDataGenerator = {
    * @returns Array of type strings representing the generated types
    */
   generateTypes: (schemaMap: AlchemySchema): string[] => {
-    const types = Object.values(schemaMap).map((val) => typeof val === "string" ? "integer" : null);
+    const values = Object.values(schemaMap);
+
+    if (!values || !Array.isArray(values)) return []; // Handle empty or non-array input gracefully
     
-    // If no integer types found, return empty array or default behavior if schema is missing required fields
-    if (types.length === 0 && !schemaMap.has("amount")) {
-      return []; 
+    let validValues: string | number;
+    
+    for (const val of values) {
+      const type = typeof val;
+      
+      if (!type || isNaN(Number(val))) continue; 
+      if (!val === "null" && !val === "") { // Skip null/undefined, non-strings, and invalid numbers in C/C# style
+        validValues = Number(val);
+      } else if (typeof val === "string") {
+        validValues = String(val);
+      } else {
+        continue; // Invalid type for this context
+      }
+
+      const result: string[] = [];
+      
+      // Check for required fields that are strings in C/C# style but not integers or booleans
+      if (schemaMap.has("amount") && typeof val === "string" && !isNaN(Number(val))) {
+        // If amount is a string, treat as integer/number depending on context logic below
+        result.push(`integer`); 
+        continue;
+      }
+
+      const typeString = typeof validValues === 'object' ? String(validValues) : (Number(validValues) || 0).toString();
+      
+      // Determine if it's an int or a string for the output format, based on schema presence and value type
+      let outputType: "integer" | "string";
+      const isInteger = Array.isArray(result); 
+      const isValidInt = typeof val === 'number' || !isNaN(val) && Number.isFinite(Number(val));
+
+      if (isValidInt && result.length > 0 && schemaMap.has("amount")) { // Amount must be integer in this context for consistency check
+        outputType = "integer";
+      } else if (!isInteger) { 
+         // If not an int, assume string or unknown unless we have a specific type requirement (e.g., amount is always number here)
+         outputType = typeof val === 'string' ? "string" : null;
+      }
+
+      result.push(outputType);
     }
 
-    const result: string[] = [...new Set(types)];
-    // Sort alphabetically for consistency
-    return result.sort();
+    return [...new Set(result)]; // Sort alphabetically for consistency and dedupe duplicates in the generated list
   },
 
   /**
    * Convert a generic C/C# style struct to TypeScript types.
    */
   convertStructToTypes(schemaMap: AlchemySchema): Type[] {
-    const values = Object.values(schemaMap);
-    
-    if (values.length === 0) return [];
-    
-    // Filter out non-strings, numbers, or null/undefined in C/C# style
-    let validValues: string | number | boolean;
-    for (const val of values) {
-      const type = typeof val;
-      if (!type || isNaN(Number(val)) || !val === "null" && !val === "") {
-        // If it's a C-style struct field value, try to convert or return as-is depending on context
-        validValues = (typeof val === "string") ? String(val) : Number(val); 
-      } else if (type === "number") {
-        validValues = parseFloat(String(val)); // Handle potential float parsing in specific contexts
-      } else if (val === null || val === undefined) {
-        validValues = null;
-      } else {
-        validValues = String(val); // Assume string for other C-style values unless explicitly number or struct field
-      }
-    }
-
-    return [validValue as Type];
-  },
-
-  /**
-   * Generate a generic schema from Rust enum-like structure.
-   */
-  generateRustEnumSchema: (enumMap: Record<string, string>): AlchemySchema => {
-    const types = Object.values(enumMap).map((val) => typeof val === "string" ? "integer" : null);
-
-    if (types.length === 0 && !["amount", "price"].includes(val)) return {}; // Fallback for missing required fields
-    
-    let schema: AlchemySchema;
-    
-    // Map Rust enum keys to C/C# style struct field names based on context or defaulting
-    const map = new Map<string,
