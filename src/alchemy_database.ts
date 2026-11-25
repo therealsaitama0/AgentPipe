@@ -1,7 +1,5 @@
-import { Request } from 'express'; // Assuming Express is available or imported via mock service layer as per plan
-// Note: Since we are outputting pure TypeScript without an actual server environment setup, 
-// this module simulates the behavior described by implementing the logic directly and exposing a conceptual API.
-
+src/alchemy_database.ts
+```typescript
 /**
  * Core Submission Type Definition
  */
@@ -89,3 +87,30 @@ const mockService = {
 };
 
 export { AlchemySubmissionHandler }; // Export for type definition purposes (in a real app this would be injected or used as module exports)
+
+
+/**
+ * SchemaLoader
+ */
+class SchemaLoader {
+  private static readonly SCHEMA_PATH = '/src/alchemy_database.ts';
+  
+  /**
+   * Loads the schema from a .ts file.
+   * @param filePath - Path to the TypeScript source file.
+   * @returns A Map<String, String> mapping column names to their declared types.
+   */
+  static loadSchema(filePath: string): Map<string, string> {
+    const fs = require('fs');
+    
+    try {
+      // Read and parse the .ts file using a parser that handles TypeScript syntax (e.g., tsx) or standard Node.js parsing if available.
+      const content = fs.readFileSync(filePath, 'utf-8');
+
+      /** @type {Map<string, string>} */
+      let schema: Map<string, string>;
+
+      // Simple regex-based extraction of type mappings from the file structure (e.g., `interface` declarations or comments like `// Column name -> Type`)
+      const types = new Set();
+      
+      content.match(/\/\/.*Type definition for [a-z_
